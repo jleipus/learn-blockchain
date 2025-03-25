@@ -1,0 +1,29 @@
+// > protoc --go_out . --go_opt paths=source_relative --go-grpc_out . --go-grpc_opt paths=source_relative proto/*.proto
+
+syntax = "proto3";
+
+option go_package = "proto/block";
+
+message BlockEntity {
+    int64 Timestamp = 1;
+    repeated Transaction Transactions = 2;
+    bytes PrevBlockHash = 3;
+    bytes PoW = 4;
+}
+
+message Transaction {
+    bytes id = 1;
+    repeated TXInput vin = 2;
+    repeated TXOutput vout = 3;
+}
+  
+message TXOutput {
+    int32 value = 1;
+    string scriptPubKey = 2;
+}
+  
+message TXInput {
+    bytes txid = 1;
+    int32 vout = 2;
+    string scriptSig = 3;
+}
