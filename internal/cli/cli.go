@@ -6,15 +6,14 @@ import (
 	"os"
 
 	"github.com/jleipus/learn-blockchain/internal/blockchain"
-	"github.com/jleipus/learn-blockchain/internal/pow"
 )
 
 type CLI struct {
 	bc *blockchain.Blockchain
-	pf pow.ProofOfWorkFactory
+	pf blockchain.ProofOfWorkFactory
 }
 
-func New(bc *blockchain.Blockchain, powFactory pow.ProofOfWorkFactory) *CLI {
+func New(bc *blockchain.Blockchain, powFactory blockchain.ProofOfWorkFactory) *CLI {
 	return &CLI{
 		bc: bc,
 		pf: powFactory,
@@ -77,7 +76,7 @@ func (cli *CLI) addBlock(data string) {
 func (cli *CLI) printChain() {
 	for i, block := range cli.bc.Blocks() {
 		fmt.Printf("[Block %d]\n", i)
-		fmt.Printf("Data:\t\t%s\n", block.GetData())
+		fmt.Printf("Data:\t\t%s\n", block.GetTransactions())
 		fmt.Printf("Hash:\t\t%x\n", block.GetHash())
 		fmt.Printf("Prev. hash:\t%x\n", block.GetPrevBlockHash())
 		fmt.Printf("PoW:\t\t%v\n\n", cli.pf.Validate(block))

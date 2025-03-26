@@ -6,23 +6,24 @@ import (
 	"time"
 
 	"github.com/boltdb/bolt"
-	"github.com/jleipus/learn-blockchain/internal/pow"
+	"github.com/jleipus/learn-blockchain/internal/transaction"
+	pb "github.com/jleipus/learn-blockchain/proto"
 	"google.golang.org/protobuf/proto"
 )
 
 const (
-	blocksBucket = "blocks"
-	genesisData  = "Genesis Block"
+	blocksBucket        = "blocks"
+	genesisCoinbaseData = "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks"
 )
 
 type Blockchain struct {
-	tip []byte
+	tip BlockHash
 	db  *bolt.DB
-	pf  pow.ProofOfWorkFactory
+	pf  ProofOfWorkFactory
 }
 
-func New(dbFile string, powFactory pow.ProofOfWorkFactory) (*Blockchain, error) {
-	var tip []byte
+func New(dbFile string, address string, powFactory ProofOfWorkFactory) (*Blockchain, error) {
+	var tip BlockHash
 
 	db, err := bolt.Open(dbFile, 0600, nil)
 	if err != nil {
@@ -33,7 +34,8 @@ func New(dbFile string, powFactory pow.ProofOfWorkFactory) (*Blockchain, error) 
 		b := tx.Bucket([]byte(blocksBucket))
 
 		if b == nil {
-			genesis := newGenesisBlock(powFactory)
+			cbtx := transaction.NewCoinbaseTX(address, genesisCoinbaseData)
+			genesis := newGenesisBlock(cbtx, powFactory)
 
 			b, err := tx.CreateBucket([]byte(blocksBucket))
 			if err != nil {
@@ -55,9 +57,9 @@ func New(dbFile string, powFactory pow.ProofOfWorkFactory) (*Blockchain, error) 
 				return fmt.Errorf("failed to put last hash: %w", err)
 			}
 
-			tip = genesis.GetHash()
+			tip = BlockHash(genesis.GetHash())
 		} else {
-			tip = b.Get([]byte("l"))
+			tip = BlockHash(b.Get([]byte("l")))
 		}
 
 		return nil
@@ -65,7 +67,7 @@ func New(dbFile string, powFactory pow.ProofOfWorkFactory) (*Blockchain, error) 
 		return nil, err
 	}
 
-	if tip == nil {
+	if tip == [32]byte{} {
 		return nil, fmt.Errorf("tip is nil")
 	}
 
@@ -80,40 +82,38 @@ func (bc *Blockchain) Close() {
 	bc.db.Close()
 }
 
-func newBlock(data string, prevBlockHash []byte, powFactory pow.ProofOfWorkFactory) pow.Block {
-	block := &block.Block{
+func newBlock(transactions []*pb.Transaction, prevBlockHash BlockHash, powFactory ProofOfWorkFactory) *pb.BlockEntity {
+	block := &pb.BlockEntity{
 		Timestamp:     time.Now().Unix(),
-		Data:          []byte(data),
-		PrevBlockHash: prevBlockHash,
-		Hash:          []byte{},
-		Nonce:         0,
+		Transactions:  transactions,
+		PrevBlockHash: prevBlockHash[:],
 	}
 
-	nonce, hash := powFactory.Produce(block)
+	hash, powData := powFactory.Produce(block)
 
 	block.Hash = hash[:]
-	block.Nonce = nonce
+	block.PoW = powData
 
 	return block
 }
 
-func newGenesisBlock(powFactory pow.ProofOfWorkFactory) *block.Block {
-	return newBlock(genesisData, []byte{}, powFactory)
+func newGenesisBlock(coinbase *pb.Transaction, powFactory ProofOfWorkFactory) *pb.BlockEntity {
+	return newBlock([]*pb.Transaction{coinbase}, BlockHash{}, powFactory)
 }
 
-func (bc *Blockchain) AddBlock(data string) error {
-	var lastHash []byte
+func (bc *Blockchain) AddBlock(transactions []*pb.Transaction) error {
+	var lastHash BlockHash
 
 	if err := bc.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
-		lastHash = b.Get([]byte("l"))
+		lastHash = BlockHash(b.Get([]byte("l")))
 
 		return nil
 	}); err != nil {
 		return err
 	}
 
-	b := newBlock(data, lastHash, bc.pf)
+	b := newBlock(transactions, lastHash, bc.pf)
 
 	return bc.db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(blocksBucket))
@@ -131,19 +131,19 @@ func (bc *Blockchain) AddBlock(data string) error {
 			return fmt.Errorf("failed to put last hash: %w", err)
 		}
 
-		bc.tip = b.GetHash()
+		bc.tip = BlockHash(b.GetHash())
 
 		return nil
 	})
 }
 
-func (bc *Blockchain) GetBlock(hash []byte) *block.Block {
-	b := &block.Block{}
+func (bc *Blockchain) GetBlock(hash BlockHash) *pb.BlockEntity {
+	b := &pb.BlockEntity{}
 
 	if err := bc.db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(blocksBucket))
 
-		encodedBlock := bucket.Get(hash)
+		encodedBlock := bucket.Get(hash[:])
 		if encodedBlock == nil {
 			return fmt.Errorf("block not found")
 		}
@@ -164,24 +164,24 @@ func (bc *Blockchain) GetBlock(hash []byte) *block.Block {
 
 type blockchainIterator struct {
 	currentIndex int
-	currentHash  []byte
+	currentHash  BlockHash
 	bc           *Blockchain
 }
 
-func (bi *blockchainIterator) next() (int, *block.Block, bool) {
+func (bi *blockchainIterator) next() (int, *pb.BlockEntity, bool) {
 	currentBlock := bi.bc.GetBlock(bi.currentHash)
 	if currentBlock == nil {
 		return 0, nil, false
 	}
 
-	bi.currentHash = currentBlock.GetPrevBlockHash()
+	bi.currentHash = BlockHash(currentBlock.GetPrevBlockHash())
 	defer func() { bi.currentIndex++ }()
 
 	return bi.currentIndex, currentBlock, true
 }
 
-func (bc *Blockchain) Blocks() iter.Seq2[int, *block.Block] {
-	return func(yield func(int, *block.Block) bool) {
+func (bc *Blockchain) Blocks() iter.Seq2[int, *pb.BlockEntity] {
+	return func(yield func(int, *pb.BlockEntity) bool) {
 		bi := &blockchainIterator{
 			currentIndex: 0,
 			currentHash:  bc.tip,

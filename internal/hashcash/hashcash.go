@@ -2,17 +2,20 @@ package hashcash
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"math/big"
 	"time"
 
+	"github.com/jleipus/learn-blockchain/internal/blockchain"
+	"github.com/jleipus/learn-blockchain/internal/transaction"
 	"github.com/jleipus/learn-blockchain/internal/utils"
-	"github.com/jleipus/learn-blockchain/proto/block"
+	pb "github.com/jleipus/learn-blockchain/proto"
 )
 
 const (
-	maxNonce int64 = math.MaxInt64
+	maxNonce uint64 = math.MaxUint64
 )
 
 var verbose bool = false
@@ -25,7 +28,7 @@ type hashCashPoW struct {
 	target *big.Int
 }
 
-func new(targetBits int64) *hashCashPoW {
+func New(targetBits int64) blockchain.ProofOfWorkFactory {
 	target := big.NewInt(1)
 	target.Lsh(target, uint(256-targetBits))
 
@@ -36,10 +39,10 @@ func new(targetBits int64) *hashCashPoW {
 	return pow
 }
 
-func (pow *hashCashPoW) Produce(block *block.Block) (int64, [32]byte) {
+func (pow *hashCashPoW) Produce(block *pb.BlockEntity) (blockchain.BlockHash, []byte) {
 	var hashInt big.Int
-	var hash [32]byte
-	nonce := int64(0)
+	var hash blockchain.BlockHash
+	nonce := uint64(0)
 
 	start := time.Now()
 	for nonce < maxNonce {
@@ -62,25 +65,29 @@ func (pow *hashCashPoW) Produce(block *block.Block) (int64, [32]byte) {
 		fmt.Printf("\rCompleted mining: %x (%s)\n", hash, time.Since(start))
 	}
 
-	return nonce, hash
+	powData := make([]byte, 8)
+	binary.BigEndian.PutUint64(powData, nonce)
+
+	return hash, powData
 }
 
-func (pow *hashCashPoW) Validate(block *block.Block) bool {
+func (pow *hashCashPoW) Validate(block *pb.BlockEntity) bool {
 	var hashInt big.Int
 
-	hash := calculateHash(block, block.GetNonce())
+	powData := block.GetPoW()
+	nonce := binary.BigEndian.Uint64(powData[:8])
+
+	hash := calculateHash(block, nonce)
 	hashInt.SetBytes(hash[:])
 
-	isValid := hashInt.Cmp(pow.target) == -1
-
-	return isValid
+	return hashInt.Cmp(pow.target) == -1
 }
 
-func calculateHash(block *block.Block, nonce int64) [32]byte {
+func calculateHash(block *pb.BlockEntity, nonce uint64) [32]byte {
 	var data []byte
 
-	data = append(data, block.PrevBlockHash...)
-	data = append(data, block.Data...)
+	data = append(data, block.GetPrevBlockHash()...)
+	data = append(data, transaction.HashTransactions(block.GetTransactions())...)
 	data = append(data, utils.IntToHex(block.Timestamp)...)
 	data = append(data, utils.IntToHex(nonce)...)
 

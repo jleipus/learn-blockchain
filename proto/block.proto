@@ -8,22 +8,23 @@ message BlockEntity {
     int64 Timestamp = 1;
     repeated Transaction Transactions = 2;
     bytes PrevBlockHash = 3;
-    bytes PoW = 4;
+    bytes Hash = 4;
+    bytes PoW = 5;
 }
 
 message Transaction {
-    bytes id = 1;
-    repeated TXInput vin = 2;
-    repeated TXOutput vout = 3;
+    bytes ID = 1;
+    repeated TXInput Vin = 2;
+    repeated TXOutput Vout = 3;
 }
   
 message TXOutput {
-    int32 value = 1;
-    string scriptPubKey = 2;
+    int32 Value = 1;
+    string ScriptPubKey = 2;
 }
   
 message TXInput {
-    bytes txid = 1;
-    int32 vout = 2;
-    string scriptSig = 3;
+    bytes TxID = 1;
+    int32 Vout = 2;
+    string ScriptSig = 3;
 }
