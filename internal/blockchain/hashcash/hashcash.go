@@ -9,9 +9,7 @@ import (
 	"time"
 
 	"github.com/jleipus/learn-blockchain/internal/blockchain"
-	"github.com/jleipus/learn-blockchain/internal/transaction"
 	"github.com/jleipus/learn-blockchain/internal/utils"
-	pb "github.com/jleipus/learn-blockchain/proto"
 )
 
 const (
@@ -39,7 +37,7 @@ func New(targetBits int64) blockchain.ProofOfWorkFactory {
 	return pow
 }
 
-func (pow *hashCashPoW) Produce(block *pb.BlockEntity) (blockchain.BlockHash, []byte) {
+func (pow *hashCashPoW) Produce(block *blockchain.Block) (blockchain.BlockHash, []byte) {
 	var hashInt big.Int
 	var hash blockchain.BlockHash
 	nonce := uint64(0)
@@ -71,10 +69,10 @@ func (pow *hashCashPoW) Produce(block *pb.BlockEntity) (blockchain.BlockHash, []
 	return hash, powData
 }
 
-func (pow *hashCashPoW) Validate(block *pb.BlockEntity) bool {
+func (pow *hashCashPoW) Validate(block *blockchain.Block) bool {
 	var hashInt big.Int
 
-	powData := block.GetPoW()
+	powData := block.PoW
 	nonce := binary.BigEndian.Uint64(powData[:8])
 
 	hash := calculateHash(block, nonce)
@@ -83,11 +81,13 @@ func (pow *hashCashPoW) Validate(block *pb.BlockEntity) bool {
 	return hashInt.Cmp(pow.target) == -1
 }
 
-func calculateHash(block *pb.BlockEntity, nonce uint64) [32]byte {
+func calculateHash(block *blockchain.Block, nonce uint64) [32]byte {
 	var data []byte
 
-	data = append(data, block.GetPrevBlockHash()...)
-	data = append(data, transaction.HashTransactions(block.GetTransactions())...)
+	txHash := block.HashTransactions()
+
+	data = append(data, block.PrevBlockHash[:]...)
+	data = append(data, txHash[:]...)
 	data = append(data, utils.IntToHex(block.Timestamp)...)
 	data = append(data, utils.IntToHex(nonce)...)
 
