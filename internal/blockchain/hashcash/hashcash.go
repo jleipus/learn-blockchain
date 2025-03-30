@@ -13,10 +13,13 @@ import (
 )
 
 const (
-	maxNonce uint64 = math.MaxUint64
+	targetBits uint32 = 18 // Target difficulty bits
+	maxNonce   uint64 = math.MaxUint64
+	sha256Bits uint32 = 256
+	nonceBytes int    = 8
 )
 
-var verbose bool = false
+var verbose = false //nolint:gochecknoglobals // Verbose flag for printing mining progress
 
 func SetVerbose() {
 	verbose = true
@@ -26,9 +29,9 @@ type hashCashPoW struct {
 	target *big.Int
 }
 
-func New(targetBits int64) blockchain.ProofOfWorkFactory {
+func New() blockchain.ProofOfWorkFactory {
 	target := big.NewInt(1)
-	target.Lsh(target, uint(256-targetBits))
+	target.Lsh(target, uint(sha256Bits-targetBits))
 
 	pow := &hashCashPoW{
 		target: target,
@@ -43,10 +46,16 @@ func (pow *hashCashPoW) Produce(block *blockchain.Block) (blockchain.BlockHash, 
 	nonce := uint64(0)
 
 	start := time.Now()
+
+	var err error
 	for nonce < maxNonce {
-		hash = calculateHash(block, nonce)
+		hash, err = calculateHash(block, nonce)
+		if err != nil {
+			panic(err)
+		}
 
 		if verbose {
+			//nolint:forbidigo // Print the hash and elapsed time
 			fmt.Printf("\rMining: %x (%s)", hash, time.Since(start))
 		}
 
@@ -54,16 +63,17 @@ func (pow *hashCashPoW) Produce(block *blockchain.Block) (blockchain.BlockHash, 
 
 		if hashInt.Cmp(pow.target) == -1 {
 			break
-		} else {
-			nonce++
 		}
+
+		nonce++
 	}
 
 	if verbose {
+		//nolint:forbidigo // Print the hash and elapsed time
 		fmt.Printf("\rCompleted mining: %x (%s)\n", hash, time.Since(start))
 	}
 
-	powData := make([]byte, 8)
+	powData := make([]byte, nonceBytes)
 	binary.BigEndian.PutUint64(powData, nonce)
 
 	return hash, powData
@@ -73,23 +83,37 @@ func (pow *hashCashPoW) Validate(block *blockchain.Block) bool {
 	var hashInt big.Int
 
 	powData := block.PoW
-	nonce := binary.BigEndian.Uint64(powData[:8])
+	nonce := binary.BigEndian.Uint64(powData[:nonceBytes])
 
-	hash := calculateHash(block, nonce)
+	hash, err := calculateHash(block, nonce)
+	if err != nil {
+		panic(err)
+	}
+
 	hashInt.SetBytes(hash[:])
 
 	return hashInt.Cmp(pow.target) == -1
 }
 
-func calculateHash(block *blockchain.Block, nonce uint64) [32]byte {
+func calculateHash(block *blockchain.Block, nonce uint64) (blockchain.BlockHash, error) {
 	var data []byte
 
 	txHash := block.HashTransactions()
 
+	timestampHex, err := utils.IntToHex(block.Timestamp)
+	if err != nil {
+		return blockchain.BlockHash{}, err
+	}
+
+	nonceHex, err := utils.IntToHex(nonce)
+	if err != nil {
+		return blockchain.BlockHash{}, err
+	}
+
 	data = append(data, block.PrevBlockHash[:]...)
 	data = append(data, txHash[:]...)
-	data = append(data, utils.IntToHex(block.Timestamp)...)
-	data = append(data, utils.IntToHex(nonce)...)
+	data = append(data, timestampHex...)
+	data = append(data, nonceHex...)
 
-	return sha256.Sum256(data)
+	return sha256.Sum256(data), nil
 }

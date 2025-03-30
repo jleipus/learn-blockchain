@@ -22,3 +22,6 @@
 
 # Database files
 *.db
+
+# VSCode files
+.vscode/**/*

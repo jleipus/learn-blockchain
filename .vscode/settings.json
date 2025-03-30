@@ -1,5 +1,0 @@
-{
-    "yaml.schemas": {
-        "https://golangci-lint.run/jsonschema/golangci.jsonschema.json": "file:///c%3A/dev/learn-blockchain/.golangci.yml"
-    }
-}

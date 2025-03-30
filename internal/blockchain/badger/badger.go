@@ -27,8 +27,8 @@ func NewBadgerDB(path string) (blockchain.Storage, error) {
 	}, nil
 }
 
-func (b *badgerStorage) GetTip() (blockchain.BlockHash, error) {
-	tip, err := b.get([]byte(tipKey))
+func (bs *badgerStorage) GetTip() (blockchain.BlockHash, error) {
+	tip, err := bs.get([]byte(tipKey))
 	if errors.Is(err, badger.ErrKeyNotFound) {
 		return blockchain.BlockHash{}, nil
 	}
@@ -42,12 +42,12 @@ func (b *badgerStorage) GetTip() (blockchain.BlockHash, error) {
 	return hash, nil
 }
 
-func (b *badgerStorage) SetTip(hash blockchain.BlockHash) error {
-	return b.set([]byte(tipKey), hash[:])
+func (bs *badgerStorage) SetTip(hash blockchain.BlockHash) error {
+	return bs.set([]byte(tipKey), hash[:])
 }
 
-func (b *badgerStorage) GetBlock(hash blockchain.BlockHash) (*blockchain.Block, error) {
-	blockData, err := b.get(hash[:])
+func (bs *badgerStorage) GetBlock(hash blockchain.BlockHash) (*blockchain.Block, error) {
+	blockData, err := bs.get(hash[:])
 	if err != nil {
 		return nil, err
 	}
@@ -60,14 +60,14 @@ func (b *badgerStorage) GetBlock(hash blockchain.BlockHash) (*blockchain.Block, 
 	return block, nil
 }
 
-func (b *badgerStorage) AddBlock(block *blockchain.Block) error {
+func (bs *badgerStorage) AddBlock(block *blockchain.Block) error {
 	blockData, err := block.Serialize()
 	if err != nil {
 		return err
 	}
 
 	hash := block.Hash
-	err = b.set(hash[:], blockData)
+	err = bs.set(hash[:], blockData)
 	if err != nil {
 		return err
 	}
@@ -101,6 +101,6 @@ func (bs *badgerStorage) get(key []byte) ([]byte, error) {
 func (bs *badgerStorage) set(key, value []byte) error {
 	return bs.db.Update(
 		func(txn *badger.Txn) error {
-			return txn.Set([]byte(key), []byte(value))
+			return txn.Set(key, value)
 		})
 }
