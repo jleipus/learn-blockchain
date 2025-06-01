@@ -1,4 +1,4 @@
-package blockchain
+package transaction
 
 import (
 	"bytes"
@@ -23,24 +23,6 @@ type Transaction struct {
 	// Vout is a slice of outputs for the transaction.
 	// Each output specifies a value and a script that can unlock it.
 	Vout []*TxOutput
-}
-
-// TxInput represents an input in a transaction.
-type TxInput struct {
-	// TxID is the ID of the transaction that created the output being spent.
-	TxID [32]byte
-	// Vout is the index of the output in the previous transaction.
-	Vout int
-	// ScriptSig is the data that is used in an outputs script to unlock the output.
-	ScriptSig string
-}
-
-// TxOutput represents an output in a transaction.
-type TxOutput struct {
-	// Value is the amount of cryptocurrency being transferred.
-	Value int32
-	// ScriptPubKey is the script that locks the output.
-	ScriptPubKey string
 }
 
 func NewCoinbaseTX(to, data string) (*Transaction, error) {
@@ -98,12 +80,4 @@ func (tx *Transaction) setID() error {
 
 	tx.ID = sha256.Sum256(encoded.Bytes())
 	return nil
-}
-
-func (in *TxInput) CanUnlockOutputWith(data string) bool {
-	return in.ScriptSig == data
-}
-
-func (out *TxOutput) CanBeUnlockedWith(data string) bool {
-	return out.ScriptPubKey == data
 }

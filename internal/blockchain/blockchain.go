@@ -216,7 +216,10 @@ func (bc *Blockchain) NewUnspentTx(from, to string, amount int32) (*Transaction,
 	outputs := []*TxOutput{}
 	outputs = append(outputs, &TxOutput{Value: amount, ScriptPubKey: to}) // Send to recipient
 	if accumulated > amount {
-		outputs = append(outputs, &TxOutput{Value: accumulated - amount, ScriptPubKey: from}) // Send change back to sender
+		outputs = append(
+			outputs,
+			&TxOutput{Value: accumulated - amount, ScriptPubKey: from},
+		) // Send change back to sender
 	}
 
 	return NewTransaction(inputs, outputs)
