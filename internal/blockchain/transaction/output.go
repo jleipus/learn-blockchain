@@ -3,6 +3,8 @@ package transaction
 import (
 	"bytes"
 	"fmt"
+
+	"github.com/jleipus/learn-blockchain/internal/blockchain/wallet"
 )
 
 // TxOutput represents an output in a transaction.
@@ -13,26 +15,29 @@ type TxOutput struct {
 	PubKeyHash []byte
 }
 
+// NewTxOutput create a new TxOutput.
+func NewTxOutput(value int32, address string) TxOutput {
+	txo := TxOutput{
+		Value:      value,
+		PubKeyHash: nil,
+	}
+	txo.Lock([]byte(address))
+
+	return txo
+}
+
 // Lock locks the output to a specific address.
 func (out *TxOutput) Lock(address []byte) error {
-	pubKeyHash, err := hashPubKey(address)
+	pubKeyHash, err := wallet.HashPubKey(address)
 	if err != nil {
 		return fmt.Errorf("failed to hash public key: %w", err)
 	}
 
-	out.PubKeyHash = pubKeyHash[1 : len(pubKeyHash)-checksumLength]
+	out.PubKeyHash = pubKeyHash[1 : len(pubKeyHash)-wallet.ChecksumLength]
 	return nil
 }
 
 // IsLockedWithKey checks if the output is locked with the specified public key hash.
 func (out *TxOutput) IsLockedWithKey(pubKeyHash []byte) bool {
-	return bytes.Compare(out.PubKeyHash, pubKeyHash) == 0
-}
-
-// NewTxOutput create a new TxOutput.
-func NewTxOutput(value int, address string) *TxOutput {
-	txo := &TxOutput{value, nil}
-	txo.Lock([]byte(address))
-
-	return txo
+	return bytes.Equal(out.PubKeyHash, pubKeyHash)
 }

@@ -8,14 +8,13 @@ import (
 
 func main() {
 	hashcash.SetVerbose()
-	powFactory := hashcash.New()
+	// powFactory := hashcash.New()
 
-	storage, err := badger.NewBadgerDB("blockchain.db")
+	storage, err := badger.NewStorage("blockchain.db")
 	if err != nil {
 		panic(err)
 	}
 	defer storage.Close()
 
-	cli := cli.New(storage, powFactory)
-	cli.Run()
+	cli.Execute()
 }

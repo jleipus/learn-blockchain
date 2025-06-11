@@ -1,10 +1,12 @@
 package wallet
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
+	"bytes"
+	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 
 	"github.com/jleipus/learn-blockchain/internal/utils"
 	"golang.org/x/crypto/ripemd160"
@@ -12,19 +14,17 @@ import (
 
 const (
 	version        = byte(0x00) // Version byte for the address
-	checksumLength = 4          // Length of the checksum
+	ChecksumLength = 4          // Length of the checksum
 )
 
+// Wallet represents a cryptocurrency wallet containing a private key and a public key.
 type Wallet struct {
-	PrivateKey ecdsa.PrivateKey
+	PrivateKey ecdh.PrivateKey
 	PublicKey  []byte
 }
 
-type Wallets struct {
-	Walllets map[string]*Wallet
-}
-
-func NewWallet() (*Wallet, error) {
+// newWallet creates a newWallet Wallet with a randomly generated key pair.
+func newWallet() (*Wallet, error) {
 	privateKey, publicKey, err := newKeyPair()
 	if err != nil {
 		return nil, err
@@ -38,22 +38,24 @@ func NewWallet() (*Wallet, error) {
 	return wallet, nil
 }
 
-func newKeyPair() (ecdsa.PrivateKey, []byte, error) {
-	curve := elliptic.P256()
-	privateKey, err := ecdsa.GenerateKey(curve, rand.Reader)
+// newKeyPair generates a new ECDH key pair using the P-256 curve.
+func newKeyPair() (ecdh.PrivateKey, []byte, error) {
+	curve := ecdh.P256()
+	privateKey, err := curve.GenerateKey(rand.Reader)
 	if err != nil {
-		return ecdsa.PrivateKey{}, nil, err
+		return ecdh.PrivateKey{}, nil, err
 	}
 
-	publicKey := append(privateKey.X.Bytes(), privateKey.Y.Bytes()...)
+	publicKey := privateKey.PublicKey().Bytes()
 
 	return *privateKey, publicKey, nil
 }
 
-func (w *Wallet) GetAddress() ([]byte, error) {
-	pubKeyHash, err := hashPubKey(w.PublicKey)
+// getAddress generates a human-readable address from the wallet's public key.
+func (w *Wallet) getAddress() (string, error) {
+	pubKeyHash, err := HashPubKey(w.PublicKey)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	versionedPayload := append([]byte{version}, pubKeyHash...)
@@ -62,10 +64,51 @@ func (w *Wallet) GetAddress() ([]byte, error) {
 	fullPayload := append(versionedPayload, checksum...)
 	address := utils.Base58Encode(fullPayload)
 
-	return address, nil
+	return hex.EncodeToString(address), nil
 }
 
-func hashPubKey(pubKey []byte) ([]byte, error) {
+// Serialize serializes the Wallet into a byte slice.
+func (w *Wallet) Serialize() []byte {
+	var result bytes.Buffer
+	result.Write(w.PublicKey)
+	result.Write(w.PrivateKey.Bytes())
+	return result.Bytes()
+}
+
+// Deserialize deserializes a byte slice into a Wallet.
+func (w *Wallet) Deserialize(d []byte) error {
+	const (
+		publicKeyLen  = 65 // For P-256 uncompressed public key
+		privateKeyLen = 32
+	)
+
+	if len(d) != publicKeyLen+privateKeyLen {
+		return fmt.Errorf("invalid data length: expected %d bytes, got %d", publicKeyLen+privateKeyLen, len(d))
+	}
+
+	curve := ecdh.P256()
+
+	publicKeyData := d[:publicKeyLen]
+	privateKeyData := d[publicKeyLen:]
+
+	privateKey, err := curve.NewPrivateKey(privateKeyData)
+	if err != nil {
+		return fmt.Errorf("failed to create private key: %w", err)
+	}
+
+	// Optional: Verify that public key matches
+	generatedPublicKey := privateKey.PublicKey().Bytes()
+	if !bytes.Equal(publicKeyData, generatedPublicKey) {
+		return fmt.Errorf("public key does not match private key")
+	}
+
+	w.PrivateKey = *privateKey
+	w.PublicKey = publicKeyData
+	return nil
+}
+
+// HashPubKey hashes the public key using SHA-256 followed by RIPEMD-160.
+func HashPubKey(pubKey []byte) ([]byte, error) {
 	pubKeySHA256 := sha256.Sum256(pubKey)
 
 	ripemd160Hasher := ripemd160.New()
@@ -83,5 +126,5 @@ func checksum(payload []byte) []byte {
 	hash := sha256.Sum256(payload)
 	hash = sha256.Sum256(hash[:])
 
-	return hash[:checksumLength]
+	return hash[:ChecksumLength]
 }

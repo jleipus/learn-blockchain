@@ -4,40 +4,64 @@ import (
 	"errors"
 
 	"github.com/jleipus/learn-blockchain/internal/blockchain"
+	"github.com/jleipus/learn-blockchain/internal/blockchain/block"
+	"github.com/jleipus/learn-blockchain/internal/blockchain/wallet"
 )
 
 type mockStorage struct {
-	tip    [32]byte
-	blocks map[[32]byte]*blockchain.Block
+	tip     block.Hash
+	blocks  map[block.Hash]block.Block
+	wallets map[string]wallet.Wallet
 }
 
 func NewStorage() blockchain.Storage {
 	return &mockStorage{
-		tip:    [32]byte{},
-		blocks: make(map[[32]byte]*blockchain.Block),
+		tip:     block.Hash{},
+		blocks:  make(map[block.Hash]block.Block),
+		wallets: make(map[string]wallet.Wallet),
 	}
 }
 
-func (m *mockStorage) GetTip() (blockchain.BlockHash, error) {
+func (m *mockStorage) GetTip() (block.Hash, error) {
 	return m.tip, nil
 }
 
-func (m *mockStorage) SetTip(tip blockchain.BlockHash) error {
+func (m *mockStorage) SetTip(tip block.Hash) error {
 	m.tip = tip
 	return nil
 }
 
-func (m *mockStorage) GetBlock(hash blockchain.BlockHash) (*blockchain.Block, error) {
+func (m *mockStorage) GetBlock(hash block.Hash) (*block.Block, error) {
 	block, exists := m.blocks[hash]
 	if !exists {
 		return nil, errors.New("block not found")
 	}
-	return block, nil
+	return &block, nil
 }
 
-func (m *mockStorage) AddBlock(block *blockchain.Block) error {
+func (m *mockStorage) AddBlock(block block.Block) error {
 	m.blocks[block.Hash] = block
 	return nil
+}
+
+func (m *mockStorage) AddWallet(address string, wallet wallet.Wallet) error {
+	m.wallets[address] = wallet
+	return nil
+}
+
+func (m *mockStorage) GetAddresses() []string {
+	addresses := make([]string, 0, len(m.wallets))
+	for address := range m.wallets {
+		addresses = append(addresses, address)
+	}
+	return addresses
+}
+
+func (m *mockStorage) GetWallet(address string) (*wallet.Wallet, error) {
+	if wallet, exists := m.wallets[address]; exists {
+		return &wallet, nil
+	}
+	return nil, errors.New("wallet not found")
 }
 
 func (m *mockStorage) Close() error {

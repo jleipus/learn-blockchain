@@ -1,12 +1,17 @@
 package blockchain
 
 import (
-	"encoding/hex"
+	"bytes"
+	"crypto/ecdsa"
 	"errors"
 	"fmt"
 	"iter"
 	"slices"
 	"time"
+
+	"github.com/jleipus/learn-blockchain/internal/blockchain/block"
+	"github.com/jleipus/learn-blockchain/internal/blockchain/transaction"
+	"github.com/jleipus/learn-blockchain/internal/blockchain/wallet"
 )
 
 const (
@@ -14,29 +19,33 @@ const (
 	genesisCoinbaseData = "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks"
 )
 
+// Blockchain represents a blockchain structure that holds blocks and manages transactions.
 type Blockchain struct {
-	storage    Storage
+	storage    block.Storage
 	powFactory ProofOfWorkFactory
+	wallets    *wallet.Collection
 }
 
-func CreateBlockchain(storage Storage, powFactory ProofOfWorkFactory, address string) error {
+// CreateBlockchain initializes a new blockchain with a genesis block.
+// It requires a storage implementation to persist the blockchain data and a proof-of-work factory to create the genesis block.
+func CreateBlockchain(storage block.Storage, powFactory ProofOfWorkFactory, address string) error {
 	tip, err := storage.GetTip()
 	if err != nil {
 		return fmt.Errorf("failed to get tip of blockchain: %w", err)
 	}
 
-	if tip != [32]byte{} {
+	if tip != *new(block.Hash) {
 		return errors.New("blockchain already exists")
 	}
 
-	cbtx, err := NewCoinbaseTX(address, genesisCoinbaseData)
+	cbtx, err := transaction.NewCoinbaseTX(address, genesisCoinbaseData)
 	if err != nil {
 		return fmt.Errorf("failed to create coinbase transaction: %w", err)
 	}
 
 	genesis := newGenesisBlock(cbtx, powFactory)
 
-	err = storage.AddBlock(genesis)
+	err = storage.AddBlock(*genesis)
 	if err != nil {
 		return fmt.Errorf("failed to add genesis block: %w", err)
 	}
@@ -49,24 +58,35 @@ func CreateBlockchain(storage Storage, powFactory ProofOfWorkFactory, address st
 	return nil
 }
 
-func LoadBlockchain(storage Storage, powFactory ProofOfWorkFactory) (*Blockchain, error) {
+// LoadBlockchain loads an existing blockchain from storage.
+func LoadBlockchain(
+	storage block.Storage,
+	powFactory ProofOfWorkFactory,
+	wallets *wallet.Collection,
+) (*Blockchain, error) {
 	tip, err := storage.GetTip()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tip of blockchain: %w", err)
 	}
 
-	if tip == [32]byte{} {
+	if tip == *new(block.Hash) {
 		return nil, errors.New("blockchain does not exist")
 	}
 
 	return &Blockchain{
 		storage:    storage,
 		powFactory: powFactory,
+		wallets:    wallets,
 	}, nil
 }
 
-func newBlock(transactions []*Transaction, prevBlockHash BlockHash, powFactory ProofOfWorkFactory) *Block {
-	block := &Block{
+// newBlock creates a new block with the given transactions and previous block hash.
+func newBlock(
+	transactions []*transaction.TX,
+	prevBlockHash block.Hash,
+	powFactory ProofOfWorkFactory,
+) *block.Block {
+	block := &block.Block{
 		Timestamp:     time.Now().Unix(),
 		Transactions:  transactions,
 		PrevBlockHash: prevBlockHash,
@@ -80,23 +100,36 @@ func newBlock(transactions []*Transaction, prevBlockHash BlockHash, powFactory P
 	return block
 }
 
-func newGenesisBlock(coinbase *Transaction, powFactory ProofOfWorkFactory) *Block {
-	return newBlock([]*Transaction{coinbase}, BlockHash{}, powFactory)
+// newGenesisBlock creates a new genesis block with the given coinbase transaction.
+func newGenesisBlock(coinbase *transaction.TX, powFactory ProofOfWorkFactory) *block.Block {
+	return newBlock([]*transaction.TX{coinbase}, block.Hash{}, powFactory)
 }
 
-func (bc *Blockchain) MineBlock(transactions []*Transaction) error {
+// GetBlock retrieves a block by its hash from the blockchain storage.
+func (bc *Blockchain) GetBlock(hash block.Hash) (*block.Block, error) {
+	return bc.storage.GetBlock(hash)
+}
+
+// MineBlock mines a new block with the provided transactions and adds it to the blockchain.
+func (bc *Blockchain) MineBlock(transactions []*transaction.TX) error {
+	for _, tx := range transactions {
+		if bc.verifyTransaction(tx) != true {
+			return fmt.Errorf("invalid transaction: %s", tx.ID)
+		}
+	}
+
 	tip, err := bc.storage.GetTip()
 	if err != nil {
 		return fmt.Errorf("failed to get tip of blockchain: %w", err)
 	}
 
-	if tip == [32]byte{} {
+	if tip == *new(block.Hash) {
 		return errors.New("tip is empty")
 	}
 
 	b := newBlock(transactions, tip, bc.powFactory)
 
-	err = bc.storage.AddBlock(b)
+	err = bc.storage.AddBlock(*b)
 	if err != nil {
 		return fmt.Errorf("failed to add block: %w", err)
 	}
@@ -109,27 +142,144 @@ func (bc *Blockchain) MineBlock(transactions []*Transaction) error {
 	return nil
 }
 
-func (bc *Blockchain) GetBlock(hash BlockHash) (*Block, error) {
-	return bc.storage.GetBlock(hash)
+// findTransaction finds a transaction by its ID.
+func (bc *Blockchain) findTransaction(id transaction.TxID) (*transaction.TX, error) {
+	for _, block := range bc.Blocks() {
+		for _, tx := range block.Transactions {
+			if bytes.Equal(tx.ID[:], id[:]) {
+				return tx, nil
+			}
+		}
+
+		if len(block.PrevBlockHash) == 0 {
+			break
+		}
+	}
+
+	return nil, errors.New("transaction not found")
 }
 
-func (bc *Blockchain) findUnspentTransactions(address string) []*Transaction {
-	var unspentTxs []*Transaction
-	spentTxOs := make(map[string][]int) // Map of transaction ID to slice of output indexes
+// signTransaction signs inputs of a Transaction.
+func (bc *Blockchain) signTransaction(tx *transaction.TX, privKey ecdsa.PrivateKey) {
+	prevTXs := make(map[transaction.TxID]*transaction.TX)
+
+	for _, vin := range tx.Vin {
+		prevTX, err := bc.findTransaction(vin.TxID)
+		if err != nil {
+			panic(err)
+		}
+		prevTXs[prevTX.ID] = prevTX
+	}
+
+	tx.Sign(privKey, prevTXs)
+}
+
+// verifyTransaction verifies transaction input signatures.
+func (bc *Blockchain) verifyTransaction(tx *transaction.TX) bool {
+	prevTXs := make(map[transaction.TxID]*transaction.TX)
+
+	for _, vin := range tx.Vin {
+		prevTX, err := bc.findTransaction(vin.TxID)
+		if err != nil {
+			panic(err)
+		}
+		prevTXs[prevTX.ID] = prevTX
+	}
+
+	return tx.Verify(prevTXs)
+}
+
+// NewUTXOTransaction creates a new transaction with unspent transaction outputs (UTXO).
+func (bc *Blockchain) NewUTXOTransaction(from, to string, amount int32) (*transaction.TX, error) {
+	var inputs []transaction.TxInput
+	var outputs []transaction.TxOutput
+
+	wlt, err := bc.wallets.GetWallet(from)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get wallet for address %s: %w", from, err)
+	}
+
+	pubKeyHash, err := wallet.HashPubKey(wlt.PublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash public key: %w", err)
+	}
+
+	acc, validOutputs := bc.FindSpendableOutputs(pubKeyHash, amount)
+	if acc < amount {
+		return nil, fmt.Errorf("not enough funds: %d < %d", acc, amount)
+	}
+
+	// Build a list of inputs
+	for txID, outs := range validOutputs {
+		for _, out := range outs {
+			input := transaction.TxInput{
+				TxID:      txID,
+				Vout:      out,
+				Signature: nil, // This will be filled later with the signature
+				PubKey:    wlt.PublicKey,
+			}
+			inputs = append(inputs, input)
+		}
+	}
+
+	// Build a list of outputs
+	outputs = append(outputs, transaction.NewTxOutput(amount, to))
+	if acc > amount {
+		outputs = append(outputs, transaction.NewTxOutput(acc-amount, from)) // a change
+	}
+
+	tx := transaction.TX{
+		ID:   transaction.TxID{}, // This will be filled later with the hash
+		Vin:  inputs,
+		Vout: outputs,
+	}
+	tx.ID = tx.Hash()
+	// bc.SignTransaction(&tx, wallet.PrivateKey)
+
+	return &tx, nil
+}
+
+// FindSpendableOutputs finds and returns unspent outputs to reference in inputs.
+func (bc *Blockchain) FindSpendableOutputs(
+	pubKeyHash []byte,
+	amount int32,
+) (int32, map[transaction.TxID][]int) {
+	unspentOutputs := make(map[transaction.TxID][]int)
+	unspentTxs := bc.findUnspentTransactions(pubKeyHash)
+	var accumulated int32
+
+	for _, tx := range unspentTxs {
+		for outIdx, out := range tx.Vout {
+			if accumulated >= amount {
+				return accumulated, unspentOutputs
+			}
+
+			if out.IsLockedWithKey(pubKeyHash) {
+				accumulated += out.Value
+				unspentOutputs[tx.ID] = append(unspentOutputs[tx.ID], outIdx)
+			}
+		}
+	}
+
+	return accumulated, unspentOutputs
+}
+
+// findUnspentTransactions returns a list of transactions containing unspent outputs.
+func (bc *Blockchain) findUnspentTransactions(pubKeyHash []byte) []*transaction.TX {
+	var unspentTxs []*transaction.TX
+	spentTxOs := make(map[transaction.TxID][]int) // Map of transaction ID to slice of output indexes
 
 	for _, b := range bc.Blocks() {
 		for _, tx := range b.Transactions {
-			txID := hex.EncodeToString(tx.ID[:])
-
 			for outID, out := range tx.Vout {
 				// Was the output spent?
-				if outputIDs, ok := spentTxOs[txID]; ok {
+				if outputIDs, ok := spentTxOs[tx.ID]; ok {
 					if slices.Contains(outputIDs, outID) {
 						continue // Skip this output if it was spent
 					}
 				}
 
-				if out.CanBeUnlockedWith(address) {
+				if out.IsLockedWithKey(pubKeyHash) {
 					unspentTxs = append(unspentTxs, tx)
 				}
 			}
@@ -139,9 +289,10 @@ func (bc *Blockchain) findUnspentTransactions(address string) []*Transaction {
 			}
 
 			for _, in := range tx.Vin {
-				if in.CanUnlockOutputWith(address) {
-					inTxID := hex.EncodeToString(in.TxID[:])
-					spentTxOs[inTxID] = append(spentTxOs[inTxID], in.Vout)
+				if ok, err := in.UsesKey(pubKeyHash); ok {
+					spentTxOs[in.TxID] = append(spentTxOs[in.TxID], in.Vout)
+				} else if err != nil {
+					// TODO: handle error
 				}
 			}
 		}
@@ -150,88 +301,13 @@ func (bc *Blockchain) findUnspentTransactions(address string) []*Transaction {
 	return unspentTxs
 }
 
-func (bc *Blockchain) FindUnspentTxOutputs(address string) []*TxOutput {
-	utxos := []*TxOutput{}
-	unspentTxs := bc.findUnspentTransactions(address)
-
-	for _, tx := range unspentTxs {
-		for _, out := range tx.Vout {
-			if out.CanBeUnlockedWith(address) {
-				utxos = append(utxos, out)
-			}
-		}
-	}
-
-	return utxos
-}
-
-func (bc *Blockchain) FindSpendableOutputs(address string, amount int32) (int32, map[string][]int) {
-	unspentOutputs := make(map[string][]int)
-	unspentTxs := bc.findUnspentTransactions(address)
-	var accumulated int32
-
-	for _, tx := range unspentTxs {
-		txID := hex.EncodeToString(tx.ID[:])
-
-		for outIdx, out := range tx.Vout {
-			if accumulated >= amount {
-				return accumulated, unspentOutputs
-			}
-
-			if out.CanBeUnlockedWith(address) {
-				accumulated += out.Value
-				unspentOutputs[txID] = append(unspentOutputs[txID], outIdx)
-			}
-		}
-	}
-
-	return accumulated, unspentOutputs
-}
-
-func (bc *Blockchain) NewUnspentTx(from, to string, amount int32) (*Transaction, error) {
-	accumulated, validOutputs := bc.FindSpendableOutputs(from, amount)
-
-	if accumulated < amount {
-		return nil, fmt.Errorf("not enough funds: %d < %d", accumulated, amount)
-	}
-
-	// Build a list of inputs
-	inputs := []*TxInput{}
-	for txid, outs := range validOutputs {
-		txID, err := hex.DecodeString(txid)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode txid %s: %w", txid, err)
-		}
-
-		for _, out := range outs {
-			inputs = append(inputs, &TxInput{
-				TxID:      [32]byte(txID),
-				Vout:      out,
-				ScriptSig: from,
-			})
-		}
-	}
-
-	// Build a list of outputs
-	outputs := []*TxOutput{}
-	outputs = append(outputs, &TxOutput{Value: amount, ScriptPubKey: to}) // Send to recipient
-	if accumulated > amount {
-		outputs = append(
-			outputs,
-			&TxOutput{Value: accumulated - amount, ScriptPubKey: from},
-		) // Send change back to sender
-	}
-
-	return NewTransaction(inputs, outputs)
-}
-
 type blockchainIterator struct {
 	currentIndex int
-	currentHash  BlockHash
+	currentHash  block.Hash
 	bc           *Blockchain
 }
 
-func (bi *blockchainIterator) next() (int, *Block, bool) {
+func (bi *blockchainIterator) next() (int, *block.Block, bool) {
 	currentBlock, err := bi.bc.GetBlock(bi.currentHash)
 	if err != nil || currentBlock == nil {
 		return 0, nil, false
@@ -243,14 +319,14 @@ func (bi *blockchainIterator) next() (int, *Block, bool) {
 	return bi.currentIndex, currentBlock, true
 }
 
-func (bc *Blockchain) Blocks() iter.Seq2[int, *Block] {
-	return func(yield func(int, *Block) bool) {
+func (bc *Blockchain) Blocks() iter.Seq2[int, *block.Block] {
+	return func(yield func(int, *block.Block) bool) {
 		tip, err := bc.storage.GetTip()
 		if err != nil {
 			panic(fmt.Errorf("failed to get tip of blockchain: %w", err))
 		}
 
-		if tip == [32]byte{} {
+		if tip == *new(block.Hash) {
 			return
 		}
 

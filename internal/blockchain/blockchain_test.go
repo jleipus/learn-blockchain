@@ -5,58 +5,53 @@ import (
 
 	"github.com/jleipus/learn-blockchain/internal/blockchain"
 	"github.com/jleipus/learn-blockchain/internal/blockchain/mock"
-	"github.com/stretchr/testify/assert"
+	"github.com/jleipus/learn-blockchain/internal/blockchain/transaction"
+	"github.com/jleipus/learn-blockchain/internal/blockchain/wallet"
 	"github.com/stretchr/testify/require"
 )
 
-func TestFindUnspentTransactions(t *testing.T) {
+func TestMain(t *testing.T) {
 	mockStorage := mock.NewStorage()
 	mockPowFactory := mock.NewPoWFactory()
-	address := "test-address"
 
-	// Create a blockchain with a genesis block
-	err := blockchain.CreateBlockchain(mockStorage, mockPowFactory, address)
+	wallets := wallet.NewCollection(mockStorage)
+
+	address1, err := wallets.AddWallet()
+	require.NoError(t, err)
+	wlt1, err := wallets.GetWallet(address1)
+	require.NoError(t, err)
+	address2, err := wallets.AddWallet()
+	require.NoError(t, err)
+	wlt2, err := wallets.GetWallet(address2)
+	require.NoError(t, err)
+	address3, err := wallets.AddWallet()
+	require.NoError(t, err)
+	wlt3, err := wallets.GetWallet(address3)
 	require.NoError(t, err)
 
-	bc, err := blockchain.LoadBlockchain(mockStorage, mockPowFactory)
+	err = blockchain.CreateBlockchain(mockStorage, mockPowFactory, address1)
+	require.NoError(t, err)
+	bc, err := blockchain.LoadBlockchain(mockStorage, mockPowFactory, wallets)
 	require.NoError(t, err)
 
-	// Add a block with two transactions
-	tx1 := &blockchain.Transaction{
-		ID: [32]byte{1},
-		Vout: []*blockchain.TxOutput{
-			{Value: 10, ScriptPubKey: address},
-		},
-	}
-	tx2 := &blockchain.Transaction{
-		ID: [32]byte{2},
-		Vout: []*blockchain.TxOutput{
-			{Value: 20, ScriptPubKey: "other-address"},
-		},
-	}
-	err = bc.MineBlock([]*blockchain.Transaction{tx1, tx2})
+	tx1, err := bc.NewUTXOTransaction(address1, address2, 10)
+	require.NoError(t, err)
+	tx2, err := bc.NewUTXOTransaction(address2, address3, 5)
 	require.NoError(t, err)
 
-	// Add another block with a transaction spending tx1's output
-	tx3 := &blockchain.Transaction{
-		ID: [32]byte{3},
-		Vin: []*blockchain.TxInput{
-			{TxID: [32]byte{1}, Vout: 0, ScriptSig: address},
-		},
-		Vout: []*blockchain.TxOutput{
-			{Value: 5, ScriptPubKey: address},
-			{Value: 5, ScriptPubKey: "other-address"},
-		},
-	}
-	err = bc.MineBlock([]*blockchain.Transaction{tx3})
+	err = bc.MineBlock([]*transaction.TX{tx1})
+	require.NoError(t, err)
+	err = bc.MineBlock([]*transaction.TX{tx2})
 	require.NoError(t, err)
 
-	unspentTxOutputs := bc.FindUnspentTxOutputs(address)
+	amount1, outputs1 := bc.FindSpendableOutputs(wlt1.PublicKey, 0)
+	require.Len(t, outputs1, 1)
+	amount2, outputs2 := bc.FindSpendableOutputs(wlt2.PublicKey, 5)
+	require.Len(t, outputs2, 1)
+	amount3, outputs3 := bc.FindSpendableOutputs(wlt3.PublicKey, 5)
+	require.Len(t, outputs3, 1)
 
-	require.Len(t, unspentTxOutputs, 2)
-
-	assert.Equal(t, int32(5), unspentTxOutputs[0].Value)
-	assert.Equal(t, address, unspentTxOutputs[0].ScriptPubKey)
-	assert.Equal(t, int32(10), unspentTxOutputs[1].Value)
-	assert.Equal(t, "test-address", unspentTxOutputs[1].ScriptPubKey)
+	require.Equal(t, 10, amount1)
+	require.Equal(t, 5, amount2)
+	require.Equal(t, 0, amount3)
 }

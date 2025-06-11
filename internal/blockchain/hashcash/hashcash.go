@@ -9,14 +9,15 @@ import (
 	"time"
 
 	"github.com/jleipus/learn-blockchain/internal/blockchain"
+	"github.com/jleipus/learn-blockchain/internal/blockchain/block"
 	"github.com/jleipus/learn-blockchain/internal/utils"
 )
 
 const (
-	targetBits uint32 = 18 // Target difficulty bits
-	maxNonce   uint64 = math.MaxUint64
-	sha256Bits uint32 = 256
-	nonceBytes int    = 8
+	targetBits   uint32 = 18 // Target difficulty bits
+	maxNonce     uint64 = math.MaxUint64
+	sha256Length uint32 = 256
+	nonceLength  int    = 8
 )
 
 var verbose = false //nolint:gochecknoglobals // Verbose flag for printing mining progress
@@ -31,7 +32,7 @@ type hashCashPoW struct {
 
 func New() blockchain.ProofOfWorkFactory {
 	target := big.NewInt(1)
-	target.Lsh(target, uint(sha256Bits-targetBits))
+	target.Lsh(target, uint(sha256Length-targetBits))
 
 	pow := &hashCashPoW{
 		target: target,
@@ -40,16 +41,18 @@ func New() blockchain.ProofOfWorkFactory {
 	return pow
 }
 
-func (pow *hashCashPoW) Produce(block *blockchain.Block) (blockchain.BlockHash, []byte) {
+var TimeNow = time.Now // Allow mocking time for testing
+
+func (pow *hashCashPoW) Produce(b *block.Block) (block.Hash, []byte) {
 	var hashInt big.Int
-	var hash blockchain.BlockHash
+	var hash block.Hash
 	nonce := uint64(0)
 
-	start := time.Now()
+	start := TimeNow()
 
 	var err error
 	for nonce < maxNonce {
-		hash, err = calculateHash(block, nonce)
+		hash, err = calculateHash(b, nonce)
 		if err != nil {
 			panic(err)
 		}
@@ -73,17 +76,21 @@ func (pow *hashCashPoW) Produce(block *blockchain.Block) (blockchain.BlockHash, 
 		fmt.Printf("\rCompleted mining: %x (%s)\n", hash, time.Since(start))
 	}
 
-	powData := make([]byte, nonceBytes)
+	powData := make([]byte, nonceLength)
 	binary.BigEndian.PutUint64(powData, nonce)
 
 	return hash, powData
 }
 
-func (pow *hashCashPoW) Validate(block *blockchain.Block) bool {
+func (pow *hashCashPoW) Validate(block *block.Block) bool {
 	var hashInt big.Int
 
 	powData := block.PoW
-	nonce := binary.BigEndian.Uint64(powData[:nonceBytes])
+
+	if len(powData) < nonceLength {
+		panic(fmt.Sprintf("Invalid PoW length: expected %d, got %d", nonceLength, len(powData)))
+	}
+	nonce := binary.BigEndian.Uint64(powData[:nonceLength])
 
 	hash, err := calculateHash(block, nonce)
 	if err != nil {
@@ -95,22 +102,22 @@ func (pow *hashCashPoW) Validate(block *blockchain.Block) bool {
 	return hashInt.Cmp(pow.target) == -1
 }
 
-func calculateHash(block *blockchain.Block, nonce uint64) (blockchain.BlockHash, error) {
+func calculateHash(b *block.Block, nonce uint64) (block.Hash, error) {
 	var data []byte
 
-	txHash := block.HashTransactions()
+	txHash := b.HashTransactions()
 
-	timestampHex, err := utils.IntToHex(block.Timestamp)
+	timestampHex, err := utils.IntToHex(b.Timestamp)
 	if err != nil {
-		return blockchain.BlockHash{}, err
+		return block.Hash{}, err
 	}
 
 	nonceHex, err := utils.IntToHex(nonce)
 	if err != nil {
-		return blockchain.BlockHash{}, err
+		return block.Hash{}, err
 	}
 
-	data = append(data, block.PrevBlockHash[:]...)
+	data = append(data, b.PrevBlockHash[:]...)
 	data = append(data, txHash[:]...)
 	data = append(data, timestampHex...)
 	data = append(data, nonceHex...)
