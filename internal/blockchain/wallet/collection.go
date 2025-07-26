@@ -1,5 +1,9 @@
 package wallet
 
+import (
+	"fmt"
+)
+
 // Storage is an interface for a storage system that can store and retrieve wallets.
 type Storage interface {
 	// AddWallet adds a new wallet to the storage and returns its address.
@@ -24,7 +28,7 @@ func NewCollection(storage Storage) *Collection {
 
 // AddWallet adds a Wallet to Collection and returns its address.
 func (c *Collection) AddWallet() (string, error) {
-	wallet, err := newWallet()
+	wallet, err := New()
 	if err != nil {
 		return "", err
 	}
@@ -34,12 +38,13 @@ func (c *Collection) AddWallet() (string, error) {
 		return "", err
 	}
 
-	err = c.storage.AddWallet(address, *wallet)
+	addressStr := fmt.Sprintf("%s", address)
+	err = c.storage.AddWallet(addressStr, *wallet)
 	if err != nil {
 		return "", err
 	}
 
-	return address, nil
+	return addressStr, nil
 }
 
 // GetAddresses returns an array of addresses stored in the Collection.

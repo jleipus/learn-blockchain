@@ -17,10 +17,10 @@ const (
 
 type TxID [32]byte
 
-// TX represents a transaction in the blockchain.
+// Tx represents a transaction in the blockchain.
 // It contains a list of inputs and outputs.
 // Each transaction has a unique ID, which is a hash of the transaction data.
-type TX struct {
+type Tx struct {
 	// ID is the unique identifier for the transaction.
 	ID TxID
 	// Vin is a slice of inputs for the transaction.
@@ -31,7 +31,7 @@ type TX struct {
 	Vout []TxOutput
 }
 
-func NewCoinbaseTX(to, data string) (*TX, error) {
+func NewCoinbaseTX(to, data string) (*Tx, error) {
 	if data == "" {
 		data = fmt.Sprintf("Reward to '%s'", to)
 	}
@@ -43,7 +43,7 @@ func NewCoinbaseTX(to, data string) (*TX, error) {
 		PubKey:    []byte(data),
 	}
 	txout := NewTxOutput(subsidy, to)
-	tx := TX{
+	tx := Tx{
 		ID:   TxID{},
 		Vin:  []TxInput{txin},
 		Vout: []TxOutput{txout},
@@ -54,12 +54,12 @@ func NewCoinbaseTX(to, data string) (*TX, error) {
 }
 
 // IsCoinbase checks whether the transaction is coinbase.
-func (tx *TX) IsCoinbase() bool {
-	return len(tx.Vin) == 1 && len(tx.Vin[0].TxID) == 0 && tx.Vin[0].Vout == -1
+func (tx *Tx) IsCoinbase() bool {
+	return len(tx.Vin) == 1 && tx.Vin[0].TxID == TxID{} && tx.Vin[0].Vout == -1
 }
 
 // Serialize serializes the transaction into a byte slice using gob encoding.
-func (tx TX) Serialize() []byte {
+func (tx Tx) Serialize() []byte {
 	var result bytes.Buffer
 	encoder := gob.NewEncoder(&result)
 
@@ -74,7 +74,7 @@ func (tx TX) Serialize() []byte {
 }
 
 // Hash returns the hash of the transaction.
-func (tx *TX) Hash() TxID {
+func (tx *Tx) Hash() TxID {
 	var hash TxID
 
 	txCopy := *tx
@@ -85,15 +85,15 @@ func (tx *TX) Hash() TxID {
 	return hash
 }
 
-// Sign signs the transaction using the provided private key.
-func (tx *TX) Sign(privKey ecdsa.PrivateKey, prevTXs map[TxID]*TX) error {
+// Sign signs the transaction inputs using the provided private key.
+func (tx *Tx) Sign(privKey ecdsa.PrivateKey, prevTXs map[TxID]*Tx) error {
 	if tx.IsCoinbase() {
 		return nil // Coinbase transactions do not require signing
 	}
 
 	for _, vin := range tx.Vin {
 		if prevTXs[vin.TxID].ID == *new(TxID) {
-			panic("invalid previous transaction is not correct")
+			panic("invalid previous transaction")
 		}
 	}
 
@@ -119,14 +119,14 @@ func (tx *TX) Sign(privKey ecdsa.PrivateKey, prevTXs map[TxID]*TX) error {
 }
 
 // Verify checks the validity of the transaction against previous transactions.
-func (tx *TX) Verify(prevTXs map[TxID]*TX) bool {
+func (tx *Tx) Verify(prevTXs map[TxID]*Tx) bool {
 	if tx.IsCoinbase() {
 		return true
 	}
 
 	for _, vin := range tx.Vin {
 		if prevTXs[vin.TxID].ID == *new(TxID) {
-			panic("invalid previous transaction is not correct")
+			panic("invalid previous transaction")
 		}
 	}
 
@@ -166,8 +166,8 @@ func (tx *TX) Verify(prevTXs map[TxID]*TX) bool {
 	return true
 }
 
-// trimmedCopy creates a copy of the transaction with inputs and outputs trimmed.
-func (tx *TX) trimmedCopy() TX {
+// trimmedCopy creates a copy of the transaction with the signatures and public keys cleared.
+func (tx *Tx) trimmedCopy() Tx {
 	var inputs []TxInput
 	var outputs []TxOutput
 
@@ -187,7 +187,7 @@ func (tx *TX) trimmedCopy() TX {
 		})
 	}
 
-	txCopy := TX{tx.ID, inputs, outputs}
+	txCopy := Tx{tx.ID, inputs, outputs}
 
 	return txCopy
 }

@@ -15,7 +15,7 @@ type TxInput struct {
 	Vout int
 	// Signature is the signature that unlocks the output being spent.
 	Signature []byte
-	// PubKey is the public key that can unlock the output being spent.
+	// PubKey is the public key that was used to lock and can unlock the output being spent.
 	PubKey []byte
 }
 

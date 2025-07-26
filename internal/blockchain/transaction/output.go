@@ -2,7 +2,6 @@ package transaction
 
 import (
 	"bytes"
-	"fmt"
 
 	"github.com/jleipus/learn-blockchain/internal/blockchain/wallet"
 )
@@ -11,7 +10,7 @@ import (
 type TxOutput struct {
 	// Value is the amount of cryptocurrency being transferred.
 	Value int32
-	// PubKeyHash is the hash of the public key that can unlock this output.
+	// PubKeyHash is the hash of the public key that locked and can unlock this output.
 	PubKeyHash []byte
 }
 
@@ -19,21 +18,23 @@ type TxOutput struct {
 func NewTxOutput(value int32, address string) TxOutput {
 	txo := TxOutput{
 		Value:      value,
-		PubKeyHash: nil,
+		PubKeyHash: nil, // Will be set when locking the output
 	}
-	txo.Lock([]byte(address))
+	if err := txo.lock([]byte(address)); err != nil {
+		panic(err) // Expect address to be valid
+	}
 
 	return txo
 }
 
-// Lock locks the output to a specific address.
-func (out *TxOutput) Lock(address []byte) error {
-	pubKeyHash, err := wallet.HashPubKey(address)
+// lock locks the output to a specific address by setting the PubKeyHash.
+// It returns an error if the address is invalid.
+func (out *TxOutput) lock(address []byte) error {
+	pubKeyHash, err := wallet.GetHashFromAddress(address)
 	if err != nil {
-		return fmt.Errorf("failed to hash public key: %w", err)
+		return err
 	}
-
-	out.PubKeyHash = pubKeyHash[1 : len(pubKeyHash)-wallet.ChecksumLength]
+	out.PubKeyHash = pubKeyHash
 	return nil
 }
 

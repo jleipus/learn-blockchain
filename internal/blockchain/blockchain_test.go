@@ -7,6 +7,7 @@ import (
 	"github.com/jleipus/learn-blockchain/internal/blockchain/mock"
 	"github.com/jleipus/learn-blockchain/internal/blockchain/transaction"
 	"github.com/jleipus/learn-blockchain/internal/blockchain/wallet"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,42 +17,91 @@ func TestMain(t *testing.T) {
 
 	wallets := wallet.NewCollection(mockStorage)
 
-	address1, err := wallets.AddWallet()
-	require.NoError(t, err)
-	wlt1, err := wallets.GetWallet(address1)
-	require.NoError(t, err)
-	address2, err := wallets.AddWallet()
-	require.NoError(t, err)
-	wlt2, err := wallets.GetWallet(address2)
-	require.NoError(t, err)
-	address3, err := wallets.AddWallet()
-	require.NoError(t, err)
-	wlt3, err := wallets.GetWallet(address3)
-	require.NoError(t, err)
+	var err error
 
-	err = blockchain.CreateBlockchain(mockStorage, mockPowFactory, address1)
-	require.NoError(t, err)
-	bc, err := blockchain.LoadBlockchain(mockStorage, mockPowFactory, wallets)
-	require.NoError(t, err)
+	var address1 string
+	t.Run("create wallet 1", func(t *testing.T) {
+		address1, err = wallets.AddWallet()
+		require.NoError(t, err, "failed to add wallet")
+	})
 
-	tx1, err := bc.NewUTXOTransaction(address1, address2, 10)
-	require.NoError(t, err)
-	tx2, err := bc.NewUTXOTransaction(address2, address3, 5)
-	require.NoError(t, err)
+	var address2 string
+	t.Run("create wallet 2", func(t *testing.T) {
+		address2, err = wallets.AddWallet()
+		require.NoError(t, err, "failed to add wallet")
+	})
 
-	err = bc.MineBlock([]*transaction.TX{tx1})
-	require.NoError(t, err)
-	err = bc.MineBlock([]*transaction.TX{tx2})
-	require.NoError(t, err)
+	var address3 string
+	t.Run("create wallet 3", func(t *testing.T) {
+		address3, err = wallets.AddWallet()
+		require.NoError(t, err, "failed to add wallet")
+	})
 
-	amount1, outputs1 := bc.FindSpendableOutputs(wlt1.PublicKey, 0)
-	require.Len(t, outputs1, 1)
-	amount2, outputs2 := bc.FindSpendableOutputs(wlt2.PublicKey, 5)
-	require.Len(t, outputs2, 1)
-	amount3, outputs3 := bc.FindSpendableOutputs(wlt3.PublicKey, 5)
-	require.Len(t, outputs3, 1)
+	var bc *blockchain.Blockchain
+	t.Run("create blockchain", func(t *testing.T) {
+		err := blockchain.CreateBlockchain(mockStorage, mockPowFactory, address1)
+		require.NoError(t, err, "failed to create blockchain")
+		bc, err = blockchain.LoadBlockchain(mockStorage, mockPowFactory, wallets)
+		require.NoError(t, err, "failed to load blockchain")
+	})
 
-	require.Equal(t, 10, amount1)
-	require.Equal(t, 5, amount2)
-	require.Equal(t, 0, amount3)
+	t.Run("check wallet 1 balance", func(t *testing.T) {
+		balance := getBalance(t, bc, address1)
+		assert.Equal(t, 10, balance)
+	})
+
+	t.Run("check wallet 2 balance", func(t *testing.T) {
+		balance := getBalance(t, bc, address2)
+		assert.Equal(t, 0, balance)
+	})
+
+	t.Run("check wallet 3 balance", func(t *testing.T) {
+		balance := getBalance(t, bc, address3)
+		assert.Equal(t, 0, balance)
+	})
+
+	t.Run("create transactions 1", func(t *testing.T) {
+		tx, err := bc.NewUTXOTransaction(address1, address2, 7)
+		require.NoError(t, err)
+
+		err = bc.MineBlock([]*transaction.Tx{tx})
+		require.NoError(t, err)
+	})
+
+	t.Run("create transactions 2", func(t *testing.T) {
+		tx, err := bc.NewUTXOTransaction(address2, address3, 5)
+		require.NoError(t, err)
+
+		err = bc.MineBlock([]*transaction.Tx{tx})
+		require.NoError(t, err)
+	})
+
+	t.Run("check new wallet 1 balance", func(t *testing.T) {
+		balance := getBalance(t, bc, address1)
+		assert.Equal(t, 3, balance)
+	})
+
+	t.Run("check new wallet 2 balance", func(t *testing.T) {
+		balance := getBalance(t, bc, address2)
+		assert.Equal(t, 2, balance)
+	})
+
+	t.Run("check new wallet 3 balance", func(t *testing.T) {
+		balance := getBalance(t, bc, address3)
+		assert.Equal(t, 5, balance)
+	})
+}
+
+func getBalance(t *testing.T, bc *blockchain.Blockchain, address string) int {
+	t.Helper()
+
+	pubKeyHash, err := wallet.GetHashFromAddress([]byte(address))
+	require.NoError(t, err, "failed to get public key hash from address")
+
+	balance := 0
+	for _, out := range bc.FindUnspentTxOutputs(pubKeyHash) {
+		balance += int(out.Value)
+	}
+
+	return balance
 }

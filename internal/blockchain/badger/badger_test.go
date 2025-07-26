@@ -25,7 +25,7 @@ func setupTestStorage(t *testing.T) (blockchain.Storage, func()) {
 
 func TestSetAndGetTip(t *testing.T) {
 	db, cleanup := setupTestStorage(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 
 	t.Run("not found", func(t *testing.T) {
 		tip, err := db.GetTip()
@@ -49,7 +49,7 @@ func TestSetAndGetTip(t *testing.T) {
 
 func TestAddAndGetBlock(t *testing.T) {
 	db, cleanup := setupTestStorage(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 
 	b := &block.Block{
 		Timestamp:     1234567890,
@@ -76,7 +76,7 @@ func TestAddAndGetBlock(t *testing.T) {
 
 func TestAddAndGetWallet(t *testing.T) {
 	db, cleanup := setupTestStorage(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 
 	collection := wallet.NewCollection(db)
 

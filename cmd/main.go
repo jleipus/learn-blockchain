@@ -1,6 +1,8 @@
 package main
 
 import (
+	"log"
+
 	"github.com/jleipus/learn-blockchain/internal/blockchain/badger"
 	"github.com/jleipus/learn-blockchain/internal/blockchain/hashcash"
 	"github.com/jleipus/learn-blockchain/internal/cli"
@@ -8,7 +10,7 @@ import (
 
 func main() {
 	hashcash.SetVerbose()
-	// powFactory := hashcash.New()
+	powFactory := hashcash.New()
 
 	storage, err := badger.NewStorage("blockchain.db")
 	if err != nil {
@@ -16,5 +18,9 @@ func main() {
 	}
 	defer storage.Close()
 
-	cli.Execute()
+	rootCmd := cli.NewRootCmd(storage, powFactory)
+
+	if err := rootCmd.Execute(); err != nil {
+		log.Fatal(err)
+	}
 }

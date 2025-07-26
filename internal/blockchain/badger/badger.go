@@ -58,7 +58,7 @@ func (bs *badgerStorage) GetBlock(hash block.Hash) (*block.Block, error) {
 		return nil, err
 	}
 
-	var block *block.Block
+	block := &block.Block{}
 	err = block.Deserialize(blockData)
 	if err != nil {
 		return nil, err
@@ -74,7 +74,11 @@ func (bs *badgerStorage) AddBlock(block block.Block) error {
 }
 
 func (bs *badgerStorage) AddWallet(address string, wallet wallet.Wallet) error {
-	walletData := wallet.Serialize()
+	walletData, err := wallet.Serialize()
+	if err != nil {
+		return err
+	}
+
 	return bs.walletsSet([]byte(address), walletData)
 }
 

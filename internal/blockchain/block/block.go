@@ -30,7 +30,7 @@ type Block struct {
 	// Timestamp is the time when the block was created.
 	Timestamp int64
 	// Transactions is a slice of transactions included in the block.
-	Transactions []*transaction.TX
+	Transactions []*transaction.Tx
 	// PrevBlockHash is the hash of the previous block in the chain.
 	PrevBlockHash Hash
 	// Hash is the hash of the current block.
@@ -69,15 +69,6 @@ func (b *Block) Serialize() []byte {
 // Deserialize deserializes a byte slice into a Block using gob encoding.
 func (b *Block) Deserialize(d []byte) error {
 	decoder := gob.NewDecoder(bytes.NewReader(d))
-
-	// Register all involved types and pointers
-	gob.Register(&Block{})
-	gob.Register(Hash{})
-	gob.Register(&transaction.TX{})
-	gob.Register(transaction.TxInput{})  // if used in TX
-	gob.Register(transaction.TxOutput{}) // if used in TX
-	gob.Register([]*transaction.TX{})    // slice of pointer TXs
-
 	err := decoder.Decode(b)
 	if err != nil {
 		return err

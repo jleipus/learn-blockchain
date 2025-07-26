@@ -15,7 +15,6 @@ import (
 )
 
 const (
-	blocksBucket        = "blocks"
 	genesisCoinbaseData = "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks"
 )
 
@@ -82,7 +81,7 @@ func LoadBlockchain(
 
 // newBlock creates a new block with the given transactions and previous block hash.
 func newBlock(
-	transactions []*transaction.TX,
+	transactions []*transaction.Tx,
 	prevBlockHash block.Hash,
 	powFactory ProofOfWorkFactory,
 ) *block.Block {
@@ -101,8 +100,8 @@ func newBlock(
 }
 
 // newGenesisBlock creates a new genesis block with the given coinbase transaction.
-func newGenesisBlock(coinbase *transaction.TX, powFactory ProofOfWorkFactory) *block.Block {
-	return newBlock([]*transaction.TX{coinbase}, block.Hash{}, powFactory)
+func newGenesisBlock(coinbase *transaction.Tx, powFactory ProofOfWorkFactory) *block.Block {
+	return newBlock([]*transaction.Tx{coinbase}, block.Hash{}, powFactory)
 }
 
 // GetBlock retrieves a block by its hash from the blockchain storage.
@@ -111,7 +110,7 @@ func (bc *Blockchain) GetBlock(hash block.Hash) (*block.Block, error) {
 }
 
 // MineBlock mines a new block with the provided transactions and adds it to the blockchain.
-func (bc *Blockchain) MineBlock(transactions []*transaction.TX) error {
+func (bc *Blockchain) MineBlock(transactions []*transaction.Tx) error {
 	for _, tx := range transactions {
 		if bc.verifyTransaction(tx) != true {
 			return fmt.Errorf("invalid transaction: %s", tx.ID)
@@ -143,7 +142,7 @@ func (bc *Blockchain) MineBlock(transactions []*transaction.TX) error {
 }
 
 // findTransaction finds a transaction by its ID.
-func (bc *Blockchain) findTransaction(id transaction.TxID) (*transaction.TX, error) {
+func (bc *Blockchain) findTransaction(id transaction.TxID) (*transaction.Tx, error) {
 	for _, block := range bc.Blocks() {
 		for _, tx := range block.Transactions {
 			if bytes.Equal(tx.ID[:], id[:]) {
@@ -160,8 +159,8 @@ func (bc *Blockchain) findTransaction(id transaction.TxID) (*transaction.TX, err
 }
 
 // signTransaction signs inputs of a Transaction.
-func (bc *Blockchain) signTransaction(tx *transaction.TX, privKey ecdsa.PrivateKey) {
-	prevTXs := make(map[transaction.TxID]*transaction.TX)
+func (bc *Blockchain) signTransaction(tx *transaction.Tx, privKey ecdsa.PrivateKey) {
+	prevTXs := make(map[transaction.TxID]*transaction.Tx)
 
 	for _, vin := range tx.Vin {
 		prevTX, err := bc.findTransaction(vin.TxID)
@@ -175,8 +174,8 @@ func (bc *Blockchain) signTransaction(tx *transaction.TX, privKey ecdsa.PrivateK
 }
 
 // verifyTransaction verifies transaction input signatures.
-func (bc *Blockchain) verifyTransaction(tx *transaction.TX) bool {
-	prevTXs := make(map[transaction.TxID]*transaction.TX)
+func (bc *Blockchain) verifyTransaction(tx *transaction.Tx) bool {
+	prevTXs := make(map[transaction.TxID]*transaction.Tx)
 
 	for _, vin := range tx.Vin {
 		prevTX, err := bc.findTransaction(vin.TxID)
@@ -190,13 +189,10 @@ func (bc *Blockchain) verifyTransaction(tx *transaction.TX) bool {
 }
 
 // NewUTXOTransaction creates a new transaction with unspent transaction outputs (UTXO).
-func (bc *Blockchain) NewUTXOTransaction(from, to string, amount int32) (*transaction.TX, error) {
-	var inputs []transaction.TxInput
-	var outputs []transaction.TxOutput
-
-	wlt, err := bc.wallets.GetWallet(from)
+func (bc *Blockchain) NewUTXOTransaction(fromAddress, toAddress string, amount int32) (*transaction.Tx, error) {
+	wlt, err := bc.wallets.GetWallet(fromAddress)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get wallet for address %s: %w", from, err)
+		return nil, fmt.Errorf("failed to get wallet for address %s: %w", fromAddress, err)
 	}
 
 	pubKeyHash, err := wallet.HashPubKey(wlt.PublicKey)
@@ -210,6 +206,7 @@ func (bc *Blockchain) NewUTXOTransaction(from, to string, amount int32) (*transa
 	}
 
 	// Build a list of inputs
+	var inputs []transaction.TxInput
 	for txID, outs := range validOutputs {
 		for _, out := range outs {
 			input := transaction.TxInput{
@@ -223,18 +220,20 @@ func (bc *Blockchain) NewUTXOTransaction(from, to string, amount int32) (*transa
 	}
 
 	// Build a list of outputs
-	outputs = append(outputs, transaction.NewTxOutput(amount, to))
+	var outputs []transaction.TxOutput
+	outputs = append(outputs, transaction.NewTxOutput(amount, toAddress))
 	if acc > amount {
-		outputs = append(outputs, transaction.NewTxOutput(acc-amount, from)) // a change
+		outputs = append(outputs, transaction.NewTxOutput(acc-amount, fromAddress)) // The change
 	}
 
-	tx := transaction.TX{
+	tx := transaction.Tx{
 		ID:   transaction.TxID{}, // This will be filled later with the hash
 		Vin:  inputs,
 		Vout: outputs,
 	}
 	tx.ID = tx.Hash()
-	// bc.SignTransaction(&tx, wallet.PrivateKey)
+
+	bc.signTransaction(&tx, wlt.PrivateKey)
 
 	return &tx, nil
 }
@@ -249,14 +248,14 @@ func (bc *Blockchain) FindSpendableOutputs(
 	var accumulated int32
 
 	for _, tx := range unspentTxs {
-		for outIdx, out := range tx.Vout {
+		for outIDx, out := range tx.Vout {
 			if accumulated >= amount {
 				return accumulated, unspentOutputs
 			}
 
 			if out.IsLockedWithKey(pubKeyHash) {
 				accumulated += out.Value
-				unspentOutputs[tx.ID] = append(unspentOutputs[tx.ID], outIdx)
+				unspentOutputs[tx.ID] = append(unspentOutputs[tx.ID], outIDx)
 			}
 		}
 	}
@@ -264,9 +263,25 @@ func (bc *Blockchain) FindSpendableOutputs(
 	return accumulated, unspentOutputs
 }
 
-// findUnspentTransactions returns a list of transactions containing unspent outputs.
-func (bc *Blockchain) findUnspentTransactions(pubKeyHash []byte) []*transaction.TX {
-	var unspentTxs []*transaction.TX
+// FindUnspentTxOutputs finds and returns all unspent transaction outputs.
+func (bc *Blockchain) FindUnspentTxOutputs(pubKeyHash []byte) []transaction.TxOutput {
+	var unspentTxOs []transaction.TxOutput
+	unspentTransactions := bc.findUnspentTransactions(pubKeyHash)
+
+	for _, tx := range unspentTransactions {
+		for _, out := range tx.Vout {
+			if out.IsLockedWithKey(pubKeyHash) {
+				unspentTxOs = append(unspentTxOs, out)
+			}
+		}
+	}
+
+	return unspentTxOs
+}
+
+// findUnspentTransactions returns a list of transactions containing unspent outputs that are locked with the specified public key hash.
+func (bc *Blockchain) findUnspentTransactions(pubKeyHash []byte) []*transaction.Tx {
+	var unspentTxs []*transaction.Tx
 	spentTxOs := make(map[transaction.TxID][]int) // Map of transaction ID to slice of output indexes
 
 	for _, b := range bc.Blocks() {
