@@ -8,9 +8,8 @@ import (
 
 func newCreateBlockchainCmd(storage blockchain.Storage, powFactory blockchain.ProofOfWorkFactory) *cobra.Command {
 	return &cobra.Command{
-		Use:     "create-blockchain",
-		Aliases: []string{"cb"},
-		Short:   "Create a new blockchain",
+		Use:   "create-blockchain",
+		Short: "Create a new blockchain",
 		Long: `Create a new blockchain with a genesis block.
 This command initializes a new blockchain with a genesis block and sets the initial state.`,
 		Args: cobra.ExactArgs(1),

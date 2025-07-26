@@ -18,6 +18,10 @@ func NewRootCmd(storage blockchain.Storage, powFactory blockchain.ProofOfWorkFac
 	rootCmd.AddCommand(
 		newCreateWalletCmd(storage),
 		newCreateBlockchainCmd(storage, powFactory),
+		newGetBalanceCmd(storage, powFactory),
+		newListAddressesCmd(storage),
+		newPrintChainCmd(storage, powFactory),
+		newSendCmd(storage, powFactory),
 	)
 
 	return rootCmd
