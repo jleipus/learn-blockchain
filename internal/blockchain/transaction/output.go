@@ -2,6 +2,7 @@ package transaction
 
 import (
 	"bytes"
+	"encoding/gob"
 
 	"github.com/jleipus/learn-blockchain/internal/blockchain/wallet"
 )
@@ -41,4 +42,49 @@ func (out *TxOutput) lock(address []byte) error {
 // IsLockedWithKey checks if the output is locked with the specified public key hash.
 func (out *TxOutput) IsLockedWithKey(pubKeyHash []byte) bool {
 	return bytes.Equal(out.PubKeyHash, pubKeyHash)
+}
+
+// Serialize serializes the output into a byte slice using gob encoding.
+func (out *TxOutput) Serialize() []byte {
+	var result bytes.Buffer
+	encoder := gob.NewEncoder(&result)
+	err := encoder.Encode(out)
+	if err != nil {
+		// Error will only occur if the input contains unsupported types.
+		// In this case, we panic because the output should only contain serializable types.
+		panic(err)
+	}
+
+	return result.Bytes()
+}
+
+// Deserialize deserializes a byte slice into a TxOutput using gob encoding.
+func (out *TxOutput) Deserialize(d []byte) error {
+	decoder := gob.NewDecoder(bytes.NewReader(d))
+	err := decoder.Decode(out)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func SerializeOutputs(outputs []TxOutput) ([]byte, error) {
+	var buffer bytes.Buffer
+	encoder := gob.NewEncoder(&buffer)
+	err := encoder.Encode(outputs)
+	if err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
+}
+
+func DeserializeOutputs(data []byte) ([]TxOutput, error) {
+	var outputs []TxOutput
+	decoder := gob.NewDecoder(bytes.NewReader(data))
+	err := decoder.Decode(&outputs)
+	if err != nil {
+		return nil, err
+	}
+	return outputs, nil
 }

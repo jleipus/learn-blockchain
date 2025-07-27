@@ -9,7 +9,7 @@ type Storage interface {
 	// AddWallet adds a new wallet to the storage and returns its address.
 	AddWallet(address string, wallet Wallet) error
 	// GetAddresses returns a slice of all wallet addresses in the storage.
-	GetAddresses() []string
+	GetAddresses() ([]string, error)
 	// GetWallet retrieves a wallet by its address.
 	GetWallet(address string) (*Wallet, error)
 }
@@ -48,7 +48,7 @@ func (c *Collection) AddWallet() (string, error) {
 }
 
 // GetAddresses returns an array of addresses stored in the Collection.
-func (c *Collection) GetAddresses() []string {
+func (c *Collection) GetAddresses() ([]string, error) {
 	return c.storage.GetAddresses()
 }
 

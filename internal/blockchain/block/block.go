@@ -21,8 +21,6 @@ type Storage interface {
 	GetBlock(hash Hash) (*Block, error)
 	// AddBlock adds a new block to the blockchain.
 	AddBlock(block Block) error
-	// Close closes the storage connection.
-	Close() error
 }
 
 // Block represents a block in the blockchain.

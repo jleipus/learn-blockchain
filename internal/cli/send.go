@@ -13,7 +13,6 @@ func newSendCmd(storage blockchain.Storage, powFactory blockchain.ProofOfWorkFac
 	return &cobra.Command{
 		Use:   "send",
 		Short: "Send coins to an address",
-		Long:  `Send coins to a specified address.`,
 		Args:  cobra.ExactArgs(3),
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := wallet.ValidateAddress(args[0]); err != nil {
@@ -52,9 +51,14 @@ func newSendCmd(storage blockchain.Storage, powFactory blockchain.ProofOfWorkFac
 				return
 			}
 
-			err = bc.MineBlock([]*transaction.Tx{tx, cbTx})
+			b, err := bc.MineBlock([]*transaction.Tx{tx, cbTx})
 			if err != nil {
 				cmd.PrintErrf("Error mining block: %v\n", err)
+				return
+			}
+
+			if err := bc.Update(*b); err != nil {
+				cmd.PrintErrf("Error updating UTXO set: %v\n", err)
 				return
 			}
 		},

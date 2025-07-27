@@ -6,6 +6,7 @@ import (
 	badger "github.com/dgraph-io/badger/v4"
 	"github.com/jleipus/learn-blockchain/internal/blockchain"
 	"github.com/jleipus/learn-blockchain/internal/blockchain/block"
+	"github.com/jleipus/learn-blockchain/internal/blockchain/transaction"
 	"github.com/jleipus/learn-blockchain/internal/blockchain/wallet"
 )
 
@@ -13,6 +14,7 @@ const (
 	blocksPrefix  = "blocks_"
 	walletsPrefix = "wallets_"
 	tipKey        = "tip"
+	utxoPrefix    = "utxo"
 )
 
 type badgerStorage struct {
@@ -82,28 +84,17 @@ func (bs *badgerStorage) AddWallet(address string, wallet wallet.Wallet) error {
 	return bs.walletsSet([]byte(address), walletData)
 }
 
-func (bs *badgerStorage) GetAddresses() []string {
+func (bs *badgerStorage) GetAddresses() ([]string, error) {
 	addresses := make([]string, 0)
-
-	err := bs.db.View(func(txn *badger.Txn) error {
-		it := txn.NewIterator(badger.DefaultIteratorOptions)
-		defer it.Close()
-		prefix := []byte(walletsPrefix)
-		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-			item := it.Item()
-			key := item.Key()
-			if len(key) > len(prefix) {
-				address := string(key[len(prefix):])
-				addresses = append(addresses, address)
-			}
-		}
+	err := bs.getAll(walletsPrefix, func(key, _ []byte) error {
+		addresses = append(addresses, string(key))
 		return nil
 	})
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
-	return addresses
+	return addresses, nil
 }
 
 func (bs *badgerStorage) GetWallet(address string) (*wallet.Wallet, error) {
@@ -123,6 +114,33 @@ func (bs *badgerStorage) GetWallet(address string) (*wallet.Wallet, error) {
 	}
 
 	return w, nil
+}
+
+func (bs *badgerStorage) GetUTXOs() (map[transaction.TxID][]transaction.TxOutput, error) {
+	utxos := make(map[transaction.TxID][]transaction.TxOutput)
+	err := bs.getAll(utxoPrefix, func(key, value []byte) error {
+		txID := transaction.TxID{}
+		copy(txID[:], key)
+		outputs, err := transaction.DeserializeOutputs(value)
+		if err != nil {
+			return err
+		}
+		utxos[txID] = outputs
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return utxos, nil
+}
+
+func (bs *badgerStorage) SetUTXOs(txID transaction.TxID, outputs []transaction.TxOutput) error {
+	data, err := transaction.SerializeOutputs(outputs)
+	if err != nil {
+		return err
+	}
+	return bs.utxosSet(txID[:], data)
 }
 
 func (bs *badgerStorage) Close() error {
@@ -145,6 +163,14 @@ func (bs *badgerStorage) walletsSet(key, value []byte) error {
 	return bs.set(append([]byte(walletsPrefix), key...), value)
 }
 
+func (bs *badgerStorage) utxosGet(key []byte) ([]byte, error) {
+	return bs.get(append([]byte(utxoPrefix), key...))
+}
+
+func (bs *badgerStorage) utxosSet(key, value []byte) error {
+	return bs.set(append([]byte(utxoPrefix), key...), value)
+}
+
 func (bs *badgerStorage) get(key []byte) ([]byte, error) {
 	value := make([]byte, 0)
 	return value, bs.db.View(
@@ -162,6 +188,31 @@ func (bs *badgerStorage) get(key []byte) ([]byte, error) {
 			value = valueCopy
 			return nil
 		})
+}
+
+func (bs *badgerStorage) getAll(prefix string, handle func([]byte, []byte) error) error {
+	return bs.db.View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		p := []byte(prefix)
+		for it.Seek(p); it.ValidForPrefix(p); it.Next() {
+			item := it.Item()
+			key := item.Key()
+			if len(key) > len(p) {
+				value, err := item.ValueCopy(nil)
+				if err != nil {
+					return err
+				}
+				err = handle(key[len(p):], value)
+				if err != nil {
+					return err
+				}
+			} else {
+				return errors.New("invalid key length") // Should not happen
+			}
+		}
+		return nil
+	})
 }
 
 func (bs *badgerStorage) set(key, value []byte) error {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jleipus/learn-blockchain/internal/blockchain/block"
 	"github.com/jleipus/learn-blockchain/internal/blockchain/transaction"
+	"github.com/jleipus/learn-blockchain/internal/blockchain/utxo"
 	"github.com/jleipus/learn-blockchain/internal/blockchain/wallet"
 )
 
@@ -23,6 +24,7 @@ type Blockchain struct {
 	storage    block.Storage
 	powFactory ProofOfWorkFactory
 	wallets    *wallet.Collection
+	utxoSet    *utxo.UTXOSet
 }
 
 // CreateBlockchain initializes a new blockchain with a genesis block.
@@ -59,7 +61,7 @@ func CreateBlockchain(storage block.Storage, powFactory ProofOfWorkFactory, addr
 
 // LoadBlockchain loads an existing blockchain from storage.
 func LoadBlockchain(
-	storage block.Storage,
+	storage Storage,
 	powFactory ProofOfWorkFactory,
 	wallets *wallet.Collection,
 ) (*Blockchain, error) {
@@ -76,6 +78,7 @@ func LoadBlockchain(
 		storage:    storage,
 		powFactory: powFactory,
 		wallets:    wallets,
+		utxoSet:    utxo.NewUTXOSet(storage),
 	}, nil
 }
 
@@ -110,35 +113,39 @@ func (bc *Blockchain) GetBlock(hash block.Hash) (*block.Block, error) {
 }
 
 // MineBlock mines a new block with the provided transactions and adds it to the blockchain.
-func (bc *Blockchain) MineBlock(transactions []*transaction.Tx) error {
+func (bc *Blockchain) MineBlock(transactions []*transaction.Tx) (*block.Block, error) {
 	for _, tx := range transactions {
-		if bc.verifyTransaction(tx) != true {
-			return fmt.Errorf("invalid transaction: %s", tx.ID)
+		ok, err := bc.verifyTransaction(tx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to verify transaction %x: %w", tx.ID, err)
+		}
+		if !ok {
+			return nil, fmt.Errorf("invalid transaction: %x", tx.ID)
 		}
 	}
 
 	tip, err := bc.storage.GetTip()
 	if err != nil {
-		return fmt.Errorf("failed to get tip of blockchain: %w", err)
+		return nil, fmt.Errorf("failed to get tip of blockchain: %w", err)
 	}
 
 	if tip == *new(block.Hash) {
-		return errors.New("tip is empty")
+		return nil, errors.New("tip is empty")
 	}
 
 	b := newBlock(transactions, tip, bc.powFactory)
 
 	err = bc.storage.AddBlock(*b)
 	if err != nil {
-		return fmt.Errorf("failed to add block: %w", err)
+		return nil, fmt.Errorf("failed to add block: %w", err)
 	}
 
 	err = bc.storage.SetTip(b.Hash)
 	if err != nil {
-		return fmt.Errorf("failed to set tip of blockchain: %w", err)
+		return nil, fmt.Errorf("failed to set tip of blockchain: %w", err)
 	}
 
-	return nil
+	return b, nil
 }
 
 // findTransaction finds a transaction by its ID.
@@ -174,18 +181,21 @@ func (bc *Blockchain) signTransaction(tx *transaction.Tx, privKey ecdsa.PrivateK
 }
 
 // verifyTransaction verifies transaction input signatures.
-func (bc *Blockchain) verifyTransaction(tx *transaction.Tx) bool {
-	prevTXs := make(map[transaction.TxID]*transaction.Tx)
+func (bc *Blockchain) verifyTransaction(tx *transaction.Tx) (bool, error) {
+	if tx.IsCoinbase() {
+		return true, nil // Coinbase transactions are always valid
+	}
 
+	prevTXs := make(map[transaction.TxID]*transaction.Tx)
 	for _, vin := range tx.Vin {
 		prevTX, err := bc.findTransaction(vin.TxID)
 		if err != nil {
-			panic(err)
+			return false, fmt.Errorf("failed to find previous transaction %x: %w", vin.TxID, err)
 		}
 		prevTXs[prevTX.ID] = prevTX
 	}
 
-	return tx.Verify(prevTXs)
+	return tx.Verify(prevTXs), nil
 }
 
 // NewUTXOTransaction creates a new transaction with unspent transaction outputs (UTXO).
@@ -200,7 +210,10 @@ func (bc *Blockchain) NewUTXOTransaction(fromAddress, toAddress string, amount i
 		return nil, fmt.Errorf("failed to hash public key: %w", err)
 	}
 
-	acc, validOutputs := bc.FindSpendableOutputs(pubKeyHash, amount)
+	acc, validOutputs, err := bc.utxoSet.FindSpendableOutputIndexes(pubKeyHash, amount)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find spendable outputs: %w", err)
+	}
 	if acc < amount {
 		return nil, fmt.Errorf("not enough funds: %d < %d", acc, amount)
 	}
@@ -238,50 +251,9 @@ func (bc *Blockchain) NewUTXOTransaction(fromAddress, toAddress string, amount i
 	return &tx, nil
 }
 
-// FindSpendableOutputs finds and returns unspent outputs to reference in inputs.
-func (bc *Blockchain) FindSpendableOutputs(
-	pubKeyHash []byte,
-	amount int32,
-) (int32, map[transaction.TxID][]int) {
-	unspentOutputs := make(map[transaction.TxID][]int)
-	unspentTxs := bc.findUnspentTransactions(pubKeyHash)
-	var accumulated int32
-
-	for _, tx := range unspentTxs {
-		for outIDx, out := range tx.Vout {
-			if accumulated >= amount {
-				return accumulated, unspentOutputs
-			}
-
-			if out.IsLockedWithKey(pubKeyHash) {
-				accumulated += out.Value
-				unspentOutputs[tx.ID] = append(unspentOutputs[tx.ID], outIDx)
-			}
-		}
-	}
-
-	return accumulated, unspentOutputs
-}
-
-// FindUnspentTxOutputs finds and returns all unspent transaction outputs.
-func (bc *Blockchain) FindUnspentTxOutputs(pubKeyHash []byte) []transaction.TxOutput {
-	var unspentTxOs []transaction.TxOutput
-	unspentTransactions := bc.findUnspentTransactions(pubKeyHash)
-
-	for _, tx := range unspentTransactions {
-		for _, out := range tx.Vout {
-			if out.IsLockedWithKey(pubKeyHash) {
-				unspentTxOs = append(unspentTxOs, out)
-			}
-		}
-	}
-
-	return unspentTxOs
-}
-
-// findUnspentTransactions returns a list of transactions containing unspent outputs that are locked with the specified public key hash.
-func (bc *Blockchain) findUnspentTransactions(pubKeyHash []byte) []*transaction.Tx {
-	var unspentTxs []*transaction.Tx
+// findUnspentTxOutputs returns a list of transaction outputs.
+func (bc *Blockchain) findUnspentTxOutputs() map[transaction.TxID][]transaction.TxOutput {
+	unspentTxOs := make(map[transaction.TxID][]transaction.TxOutput)
 	spentTxOs := make(map[transaction.TxID][]int) // Map of transaction ID to slice of output indexes
 
 	for _, b := range bc.Blocks() {
@@ -294,9 +266,7 @@ func (bc *Blockchain) findUnspentTransactions(pubKeyHash []byte) []*transaction.
 					}
 				}
 
-				if out.IsLockedWithKey(pubKeyHash) {
-					unspentTxs = append(unspentTxs, tx)
-				}
+				unspentTxOs[tx.ID] = append(unspentTxOs[tx.ID], out)
 			}
 
 			if tx.IsCoinbase() {
@@ -304,16 +274,28 @@ func (bc *Blockchain) findUnspentTransactions(pubKeyHash []byte) []*transaction.
 			}
 
 			for _, in := range tx.Vin {
-				if ok, err := in.UsesKey(pubKeyHash); ok {
-					spentTxOs[in.TxID] = append(spentTxOs[in.TxID], in.Vout)
-				} else if err != nil {
-					// TODO: handle error
-				}
+				spentTxOs[in.TxID] = append(spentTxOs[in.TxID], in.Vout)
 			}
 		}
 	}
 
-	return unspentTxs
+	return unspentTxOs
+}
+
+func (bc *Blockchain) ReindexUTXOSet() error {
+	utxoSet := bc.findUnspentTxOutputs()
+	if err := bc.utxoSet.Set(utxoSet); err != nil {
+		return fmt.Errorf("failed to set UTXO set: %w", err)
+	}
+	return nil
+}
+
+func (bc *Blockchain) Update(b block.Block) error {
+	return bc.utxoSet.Update(b)
+}
+
+func (bc *Blockchain) FindUnspentTxOutputs(pubKeyHash []byte) ([]transaction.TxOutput, error) {
+	return bc.utxoSet.FindUnspentTxOutputs(pubKeyHash)
 }
 
 type blockchainIterator struct {

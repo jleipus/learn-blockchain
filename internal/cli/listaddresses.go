@@ -8,13 +8,15 @@ import (
 
 func newListAddressesCmd(storage blockchain.Storage) *cobra.Command {
 	return &cobra.Command{
-		Use:     "list-addresses",
-		Aliases: []string{"ls"},
-		Short:   "List all wallet addresses",
-		Long:    `List all wallet addresses stored in the blockchain.`,
+		Use:   "list-addresses",
+		Short: "List all wallet addresses",
 		Run: func(cmd *cobra.Command, args []string) {
 			wallets := wallet.NewCollection(storage)
-			addresses := wallets.GetAddresses()
+			addresses, err := wallets.GetAddresses()
+			if err != nil {
+				cmd.Println("Error retrieving addresses:", err)
+				return
+			}
 
 			if len(addresses) == 0 {
 				cmd.Println("No addresses found.")

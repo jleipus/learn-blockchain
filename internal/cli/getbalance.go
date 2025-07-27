@@ -10,10 +10,8 @@ func newGetBalanceCmd(storage blockchain.Storage, powFactory blockchain.ProofOfW
 	return &cobra.Command{
 		Use:     "get-balance",
 		Aliases: []string{"b"},
-		Short:   "Get the balance of an address",
-		Long: `Get the balance of a specific address in the blockchain.
-This command retrieves the balance of the specified address by summing up all the transaction outputs that belong to it.`,
-		Args: cobra.ExactArgs(1),
+		Short:   "Get the balance of a wallet by the address",
+		Args:    cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := wallet.ValidateAddress(args[0]); err != nil {
 				cmd.PrintErrf("Invalid address %s: %v\n", args[0], err)
@@ -35,7 +33,13 @@ This command retrieves the balance of the specified address by summing up all th
 			}
 
 			balance := 0
-			for _, out := range bc.FindUnspentTxOutputs(pubKeyHash) {
+			outputs, err := bc.FindUnspentTxOutputs(pubKeyHash)
+			if err != nil {
+				cmd.PrintErrf("Error finding unspent transaction outputs: %v\n", err)
+				return
+			}
+
+			for _, out := range outputs {
 				balance += int(out.Value)
 			}
 

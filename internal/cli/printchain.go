@@ -10,10 +10,8 @@ import (
 
 func newPrintChainCmd(storage blockchain.Storage, powFactory blockchain.ProofOfWorkFactory) *cobra.Command {
 	return &cobra.Command{
-		Use:     "print-chain",
-		Aliases: []string{"p"},
-		Short:   "Print the blockchain",
-		Long:    `Print the entire blockchain to the console.`,
+		Use:   "print-chain",
+		Short: "Print the blockchain",
 		Run: func(cmd *cobra.Command, args []string) {
 			wallets := wallet.NewCollection(storage)
 

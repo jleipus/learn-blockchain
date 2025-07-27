@@ -8,10 +8,8 @@ import (
 
 func newCreateWalletCmd(storage blockchain.Storage) *cobra.Command {
 	return &cobra.Command{
-		Use:     "create-wallet",
-		Aliases: []string{"cw"},
-		Short:   "Create a new wallet",
-		Long:    `Create a new wallet and get its address.`,
+		Use:   "create-wallet",
+		Short: "Create a new wallet",
 		Run: func(cmd *cobra.Command, args []string) {
 			wallets := wallet.NewCollection(storage)
 			address, err := wallets.AddWallet()

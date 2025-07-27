@@ -7,6 +7,7 @@ import (
 	"github.com/jleipus/learn-blockchain/internal/blockchain"
 	"github.com/jleipus/learn-blockchain/internal/blockchain/badger"
 	"github.com/jleipus/learn-blockchain/internal/blockchain/block"
+	"github.com/jleipus/learn-blockchain/internal/blockchain/transaction"
 	"github.com/jleipus/learn-blockchain/internal/blockchain/wallet"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -106,9 +107,36 @@ func TestAddAndGetWallet(t *testing.T) {
 	})
 
 	t.Run("get addresses", func(t *testing.T) {
-		addresses := db.GetAddresses()
+		addresses, err := db.GetAddresses()
+		require.NoError(t, err)
+
 		assert.Contains(t, addresses, address1)
 		assert.Contains(t, addresses, address2)
 		assert.Len(t, addresses, 2)
+	})
+}
+
+func TestGetAndSetUTXOs(t *testing.T) {
+	db, cleanup := setupTestStorage(t)
+	t.Cleanup(cleanup)
+
+	txID := transaction.TxID{'t', 'x', 'i', 'd'}
+	outputs := []transaction.TxOutput{
+		{Value: 100, PubKeyHash: []byte("pubkey1")},
+		{Value: 200, PubKeyHash: []byte("pubkey2")},
+	}
+
+	err := db.SetUTXOs(txID, outputs)
+	require.NoError(t, err)
+
+	t.Run("ok", func(t *testing.T) {
+		retrievedOutputs, err := db.GetUTXOs()
+		require.NoError(t, err)
+		assert.Equal(t, map[transaction.TxID][]transaction.TxOutput{txID: outputs}, retrievedOutputs)
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		_, err := db.GetUTXOs()
+		assert.NoError(t, err)
 	})
 }

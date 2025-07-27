@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TODO: Improve test coverage
+
 func TestWallet(t *testing.T) {
 	wallets := wallet.NewCollection(mock.NewStorage())
 
