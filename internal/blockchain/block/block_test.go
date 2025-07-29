@@ -1,7 +1,6 @@
 package block_test
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"testing"
 	"time"
@@ -68,18 +67,18 @@ func TestHashTransactions(t *testing.T) {
 	})
 
 	t.Run("single transaction", func(t *testing.T) {
+		tx := getTransaction("single-tx")
+
 		b := &block.Block{
 			Transactions: []*transaction.Tx{
-				getTransaction("single-tx"),
+				tx,
 			},
 		}
 
 		result := b.HashTransactions()
 
-		// Pad to 32 bytes to match TxID size
-		txID := make([]byte, 32)
-		copy(txID, []byte("single-tx"))
-		expected := sha256.Sum256(txID)
+		hash := sha256.Sum256(tx.Serialize())
+		expected := sha256.Sum256(append(hash[:], hash[:]...))
 
 		assert.Equal(t, expected[:], result)
 	})
@@ -89,13 +88,10 @@ func TestHashTransactions(t *testing.T) {
 
 		result := b.HashTransactions()
 
-		tx1ID := make([]byte, 32)
-		copy(tx1ID, []byte("tx1"))
-		tx2ID := make([]byte, 32)
-		copy(tx2ID, []byte("tx2"))
+		hash1 := sha256.Sum256(b.Transactions[0].Serialize())
+		hash2 := sha256.Sum256(b.Transactions[1].Serialize())
+		expected := sha256.Sum256(append(hash1[:], hash2[:]...))
 
-		combined := bytes.Join([][]byte{tx1ID, tx2ID}, []byte{})
-		expected := sha256.Sum256(combined)
 		assert.Equal(t, expected[:], result)
 	})
 }

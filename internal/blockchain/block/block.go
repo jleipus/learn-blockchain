@@ -2,10 +2,10 @@ package block
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/gob"
 
 	"github.com/jleipus/learn-blockchain/internal/blockchain/transaction"
+	"github.com/jleipus/learn-blockchain/internal/merkel"
 )
 
 type Hash [32]byte
@@ -41,13 +41,13 @@ type Block struct {
 
 // HashTransactions computes the hash of all transactions in the block.
 func (b *Block) HashTransactions() []byte {
-	var txHashes [][]byte
+	txHashes := make([][]byte, 0, len(b.Transactions))
 	for _, tx := range b.Transactions {
-		txHashes = append(txHashes, tx.ID[:])
+		txHashes = append(txHashes, tx.Serialize())
 	}
 
-	txSHA256 := sha256.Sum256(bytes.Join(txHashes, []byte{}))
-	return txSHA256[:]
+	mTree := merkel.NewTree(txHashes)
+	return mTree.Root.GetData()
 }
 
 // Serialize serializes the block into a byte slice using gob encoding.
